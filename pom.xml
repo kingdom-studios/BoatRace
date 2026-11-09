@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>pl.aleksialek</groupId>
+    <artifactId>boatrace-parent</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+    <name>BoatRace (parent)</name>
+
+    <!-- Foundation is built from the LOCAL sources in lib/foundation (reactor module);
+         it is never downloaded as a ready-made artifact. -->
+    <modules>
+        <module>lib/foundation</module>
+        <module>boatrace</module>
+    </modules>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <java.version>21</java.version>
+        <lombok.version>1.18.46</lombok.version>
+
+        <!-- Same range style that Foundation's own pom uses for Paper 26.x.
+             If Maven cannot resolve it, replace with an exact version listed at
+             https://repo.papermc.io/service/rest/repository/browse/maven-public/io/papermc/paper/paper-api/ -->
+        <paper.version>[26.2.build,26.2-pre)</paper.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>papermc</id>
+            <url>https://repo.papermc.io/repository/maven-public/</url>
+        </repository>
+        <repository>
+            <id>mineacademy-repo</id>
+            <url>https://bitbucket.org/kangarko/libraries/raw/master</url>
+        </repository>
+        <repository>
+            <id>spigot-repo</id>
+            <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url>
+        </repository>
+        <repository>
+            <id>minecraft-libraries</id>
+            <url>https://libraries.minecraft.net</url>
+        </repository>
+    </repositories>
+</project>
