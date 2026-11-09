@@ -64,6 +64,7 @@ final class JoinSub extends RaceSubCommand {
 			switch (result) {
 				case BANNED -> this.info("race.banned");
 				case NOT_READY -> this.info("race.not-ready", "arena", arena.getName(), "missing", arena.missing());
+				case BUSY -> this.info("race.all-busy", "arena", arena.getName());
 				default -> this.info("race.inventory-save-failed");
 			}
 	}

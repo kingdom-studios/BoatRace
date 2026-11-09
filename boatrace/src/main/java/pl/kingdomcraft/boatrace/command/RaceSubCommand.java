@@ -31,7 +31,7 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 		this.setPermission(admin ? ADMIN_PERMISSION : null);
 	}
 
-	protected final BoatRacePlugin plugin() {
+	final BoatRacePlugin plugin() {
 		return BoatRacePlugin.getInstance();
 	}
 
@@ -66,19 +66,40 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 		return region;
 	}
 
-	/** Warns when the spawn lies inside the start line (the boat must spawn BEFORE the line). */
+	/** Warns when a grid position lies inside the start line (boats must spawn BEFORE the line). */
 	protected final void warnSpawnPlacement(final Arena arena) {
-		if (arena.getSpawn() == null || arena.getStartLine() == null)
+		if (arena.getStartLine() == null)
 			return;
 
-		final org.bukkit.Location spawn = arena.getSpawn().toLocation();
+		for (final pl.kingdomcraft.boatrace.arena.Point point : arena.getSpawns().values()) {
+			final org.bukkit.Location spawn = point.toLocation();
 
-		if (spawn != null && arena.getStartLine().contains(spawn))
-			this.info("command.spawn-inside-start");
+			if (spawn != null && arena.getStartLine().contains(spawn)) {
+				this.info("command.spawn-inside-start");
+				return;
+			}
+		}
+	}
+
+	/** Parses a grid position (1 .. grid.max-positions) or stops the command. */
+	protected final int gridIndex(final String raw) {
+		final int max = this.plugin().getSettings().maxGridPositions;
+
+		try {
+			final int index = Integer.parseInt(raw);
+
+			if (index >= 1 && index <= max)
+				return index;
+
+		} catch (final NumberFormatException ignored) {
+		}
+
+		this.fail("arena.spawn-invalid-index", "value", raw, "max", max);
+		return 1;
 	}
 
 	/** Sends the messages.yml entry {@code key} (with the prefix) to the command sender. */
-	protected final void info(final String key, final Object... placeholders) {
+	final void info(final String key, final Object... placeholders) {
 		Msg.send(this.getSender(), key, placeholders);
 	}
 

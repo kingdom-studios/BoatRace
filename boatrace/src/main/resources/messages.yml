@@ -11,6 +11,8 @@ prefix: "&8[&bBoatRace&8] &7"
 # Action bar (refreshed every server tick)
 # ------------------------------------------------------------------------------------------------
 actionbar:
+  # Event lobby, waiting for /bre start. {time} {players} {slots} {position}
+  lobby: "&eTime: &f{time} &8| &7Grid position &f#{position} &8| &7Waiting for the start &f({players}/{slots})"
   # Before lights out. {time}
   countdown: "&eTime: &f{time}"
   # Before lights out after a jump start. {time} {penalty}
@@ -51,6 +53,34 @@ title:
     fade-in: 0
     stay: 40
     fade-out: 8
+  # event: shown to every racer when the lights sequence is about to begin
+  event-start:
+    title: "&e&lGET READY"
+    subtitle: "&7The start lights are about to begin"
+    fade-in: 5
+    stay: 40
+    fade-out: 10
+  # off track, action PENALTY. {penalty}
+  off-track:
+    title: ""
+    subtitle: "&c&lOFF TRACK! &f+{penalty}s &cpenalty"
+    fade-in: 0
+    stay: 30
+    fade-out: 8
+  # off track, action TELEPORT_BACK. {penalty}
+  off-track-back:
+    title: ""
+    subtitle: "&c&lOFF TRACK! &7Back on the track &f+{penalty}s"
+    fade-in: 0
+    stay: 30
+    fade-out: 8
+  # off track, action RESET
+  off-track-reset:
+    title: "&c&lOFF TRACK!"
+    subtitle: "&7Run restarted"
+    fade-in: 0
+    stay: 30
+    fade-out: 8
   # {time} {arena}
   finish:
     title: "&a&lFINISH"
@@ -61,7 +91,7 @@ title:
 
 # ------------------------------------------------------------------------------------------------
 # Finish summary - the ONLY chat message a racer receives.
-# {player} {arena} {time} {penalty_note} {best} {delta} {rank} {reward_note}
+# {player} {arena} {time} {penalty_note} {best} {delta} {rank} {reward_note} {event_note}
 # ------------------------------------------------------------------------------------------------
 finish:
   # first finished race on this arena
@@ -71,6 +101,7 @@ finish:
     - "  &7Time: &f&l{time}{penalty_note}"
     - "  &6&lFIRST PERSONAL BEST! &7Leaderboard: &e#{rank}"
     - "{reward_note}"
+    - "{event_note}"
     - "&8&m                                                  "
   # beat the previous personal best
   new-best:
@@ -79,6 +110,7 @@ finish:
     - "  &7Time: &f&l{time}{penalty_note}"
     - "  &6&lNEW PERSONAL BEST! &a-{delta}s &7Leaderboard: &e#{rank}"
     - "{reward_note}"
+    - "{event_note}"
     - "&8&m                                                  "
   # slower than the personal best
   normal:
@@ -87,6 +119,7 @@ finish:
     - "  &7Time: &f&l{time}{penalty_note}"
     - "  &7Personal best: &f{best} &c(+{delta}s)"
     - "{reward_note}"
+    - "{event_note}"
     - "&8&m                                                  "
   # banned players (time not saved)
   banned:
@@ -98,6 +131,8 @@ finish:
   penalty-note: " &c(incl. +{penalty}s penalty)"
   # {arena} - inserted as {reward_note} when a reward was given (lines that end up empty are skipped)
   reward-note: "  &6&lREWARD! &7You received the reward for finishing &f{arena}&7."
+  # {position} {racers} - inserted as {event_note} in events
+  event-note: "  &b&lEVENT &7Finishing position: &e#{position} &7of &f{racers}"
 
 # ------------------------------------------------------------------------------------------------
 # Hotbar items / wand
@@ -122,6 +157,15 @@ race:
   world-not-loaded: "&cThe arena world is not loaded."
   boat-spawn-failed: "&cCould not spawn the boat - check 'boat-type' in config.yml."
   seat-failed: "&cCould not seat you in a boat - you have left the race."
+  # {arena}
+  all-busy: "&cArena &f{arena} &cand all its alternative maps are busy right now. Try again in a moment."
+  # Shown when the player was moved to an alternative map. {arena} {world} {requested}
+  # Empty by default (silent join) - e.g. "&7{requested} is busy - you race on &f{arena} &7in &f{world}&7."
+  redirected: ""
+  # Chat warnings when leaving the track (the title is shown anyway; empty = chat silent). {penalty}
+  off-track: ""
+  off-track-back: ""
+  off-track-reset: ""
 
 command:
   only-players: "&cThis command can only be used by players."
@@ -158,7 +202,27 @@ arena:
     - " &f4. &7(optional) &f/bre setfinish {arena} &7- otherwise the start line is the finish"
     - " &f5. &7(optional) &f/bre lights {arena} add|set &7- F1 start lamps"
     - " &f6. &7(optional) &f/bre reward {arena} once|always <command>"
-  spawn-set: "&aSpawn of &f{arena} &aset. The boat will face your current direction."
+  # {arena} {index}
+  spawn-set: "&aGrid position &f#{index} &aof &f{arena} &aset. The boat will face your current direction."
+  spawn-removed: "&aRemoved grid position &f#{index} &aof &f{arena}&a."
+  spawn-not-found: "&cArena &f{arena} &chas no grid position &f#{index}&c."
+  # {value} {max}
+  spawn-invalid-index: "&cGrid position must be a number from 1 to {max} (got &f{value}&c)."
+  # {arena} {spawns}
+  spawn-list: "&7Grid positions of &f{arena}&7: &f{spawns}"
+  # {arena} {region}
+  signal-set: "&aStart signal of &f{arena} &aset: &7{region} &7(turns green at lights out)"
+  signal-cleared: "&aRemoved the start signal of &f{arena}&a."
+  # {arena} {blocks}
+  track-blocks: "&7Track blocks of &f{arena}&7: &f{blocks}"
+  track-blocks-default: "&7Arena &f{arena} &7has no own track blocks - using config.yml defaults: &f{blocks}"
+  # {arena} {block}
+  track-block-added: "&aAdded track block &f{block} &ato &f{arena}&a."
+  track-block-removed: "&aRemoved track block &f{block} &afrom &f{arena}&a."
+  track-blocks-cleared: "&aRemoved all track blocks of &f{arena}&a (config.yml defaults apply)."
+  # {value}
+  unknown-block: "&cUnknown block: &f{value}"
+  no-block-target: "&cLook at a block (max 30 blocks) or name a material."
   # {arena} {region}
   start-set: "&aStart line of &f{arena} &aset: &7{region}"
   start-set-circuit: "&aStart line of &f{arena} &aset: &7{region} &7(it is also the finish line - circuit)"
@@ -181,14 +245,17 @@ arena:
   list-ready: " &8- &f{arena} &a(ready) &7checkpoints: &f{checkpoints}"
   # {arena} {checkpoints} {missing}
   list-not-ready: " &8- &f{arena} &c(not ready, missing: {missing}) &7checkpoints: &f{checkpoints}"
-  # {arena} {status} {spawn} {start} {finish} {checkpoints} {lamps} {reward_mode} {reward_count}
+  # {arena} {status} {spawn} {start} {finish} {checkpoints} {lamps} {signal} {track_blocks} {fallback} {reward_mode} {reward_count}
   info:
     - "Arena &f{arena} {status}"
-    - " &8- &7Spawn: &f{spawn}"
+    - " &8- &7Grid positions: &f{spawn}"
     - " &8- &7Start line: &f{start}"
     - " &8- &7Finish line: &f{finish}"
     - " &8- &7Checkpoints: &f{checkpoints}"
     - " &8- &7Start lamps: &f{lamps}"
+    - " &8- &7Start signal: &f{signal}"
+    - " &8- &7Track blocks: &f{track_blocks}"
+    - " &8- &7Alternative maps: &f{fallback}"
     - " &8- &7Reward: &f{reward_mode} &7({reward_count} commands)"
   info-ready: "&a(ready)"
   # {missing}
@@ -244,3 +311,17 @@ admin:
   time-changed: "&aChanged the time of &f{player} &aby &f{delta} &a(records: {count})."
   # {player} {count}
   time-reset: "&aReset the times of &f{player} &a(records: {count})."
+
+event:
+  # {arena} {world} {slots}
+  opened: "&aEvent lobby opened on &f{arena} &7(world {world}, {slots} grid positions). Players join with &f/bre join {arena}&a, start with &f/bre start {arena}&a."
+  started: "&aEvent on &f{arena} &astarted - the lights are about to begin."
+  closed: "&aEvent on &f{arena} &aclosed, all racers were sent to the hub."
+  already-open: "&cThere is already an event on &f{arena}&c."
+  already-started: "&cThe event on &f{arena} &chas already started."
+  no-event: "&cThere is no event on &f{arena}&c. Open one with &f/bre event {arena} open"
+  not-ready: "&cArena &f{arena} &cis not ready yet."
+  busy: "&cArena &f{arena} &cand all its alternative maps are busy - wait until the current races are over."
+  empty: "&cNobody has joined the event on &f{arena} &cyet."
+  # {arena} {world} {phase} {players} {slots}
+  status: "&7Event on &f{arena}&7: &f{phase} &7in world &f{world}&7, racers &f{players}/{slots}"

@@ -2,8 +2,11 @@ package pl.kingdomcraft.boatrace.race;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -13,6 +16,8 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Boat;
 import org.bukkit.entity.Entity;
@@ -28,6 +33,7 @@ import io.papermc.paper.entity.TeleportFlag;
 import pl.kingdomcraft.boatrace.Settings;
 import pl.kingdomcraft.boatrace.arena.Arena;
 import pl.kingdomcraft.boatrace.arena.ArenaManager;
+import pl.kingdomcraft.boatrace.arena.Point;
 import pl.kingdomcraft.boatrace.arena.Region;
 import pl.kingdomcraft.boatrace.storage.RaceRecord;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
@@ -35,17 +41,21 @@ import pl.kingdomcraft.boatrace.util.Msg;
 import pl.kingdomcraft.boatrace.util.TimeFmt;
 
 /**
- * The race engine: join / leave / reset, F1 start lights, dynamic jumpstart penalty, start line, invisible
- * checkpoint zones, finish line and rewards.
+ * The race engine: join / leave / reset, solo runs and events (multi-spawn grid), F1 start lights, start signal
+ * blocks, dynamic jumpstart penalty, start line, invisible checkpoint zones, off-track detection, finish, rewards
+ * and fallback maps.
+ *
+ * Every race runs in a {@link Heat} on one arena instance (arena + world). An instance is occupied by one solo racer
+ * or one event; when it is busy, joining players are sent to a copy of the track in another world (fallback maps).
  *
  * Lap validation: a finish only counts when the race was started correctly (lights out), the racer crossed the
- * start line afterwards and then passed 100% of the checkpoints in order. This makes tracks where the start and
- * finish line are the same zone safe - respawning in front of the line can never complete a lap.
+ * start line afterwards and then passed 100% of the checkpoints in order.
  *
  * Performance notes:
- *  - ONE repeating task (every tick, so the milliseconds run smoothly) updates the action bar of all racers.
+ *  - ONE repeating task (every tick, so the milliseconds run smoothly) updates the action bar of all racers and
+ *    runs the off-track check every few ticks.
  *  - Zones are only evaluated inside VehicleMoveEvent of race boats (O(1) map lookup for any other vehicle).
- *  - Times use System.nanoTime(). Start lamps are client-side block changes, so the world is never modified.
+ *  - Lamps (and the start signal in CLIENT mode) are client-side block changes, so the world is never modified.
  */
 public final class RaceManager {
 
@@ -54,7 +64,26 @@ public final class RaceManager {
 		JOINED,
 		BANNED,
 		NOT_READY,
+		/** the arena, all its copies (and - if enabled - every other arena) are occupied */
+		BUSY,
 		FAILED
+	}
+
+	/** Outcome of the event commands. */
+	public enum EventResult {
+		OPENED,
+		STARTED,
+		CLOSED,
+		ALREADY_OPEN,
+		ALREADY_STARTED,
+		NO_EVENT,
+		NOT_READY,
+		BUSY,
+		EMPTY
+	}
+
+	/** Read-only view of an event for /bre event status. */
+	public record EventInfo(String world, String phase, int players, int capacity) {
 	}
 
 	private enum LeaveMode {
@@ -74,8 +103,11 @@ public final class RaceManager {
 
 	private final Map<UUID, RaceSession> sessions = new HashMap<>();
 	private final Map<UUID, RaceSession> boats = new HashMap<>();
+	/** occupied arena instances: "arena@world" -> heat */
+	private final Map<String, Heat> heats = new LinkedHashMap<>();
 
 	private BukkitTask ticker;
+	private long tickCounter;
 
 	public RaceManager(final JavaPlugin plugin, final Settings settings, final ArenaManager arenas, final RecordStorage storage) {
 		this.plugin = plugin;
@@ -93,7 +125,7 @@ public final class RaceManager {
 		this.ticker = Bukkit.getScheduler().runTaskTimer(this.plugin, this::tick, 1L, 1L);
 	}
 
-	/** Server shutdown / plugin disable: remove every boat and give everybody their inventory back. */
+	/** Server shutdown / plugin disable: remove every boat, restore world blocks, give everybody their inventory back. */
 	public void shutdown() {
 		if (this.ticker != null)
 			this.ticker.cancel();
@@ -109,6 +141,12 @@ public final class RaceManager {
 	private void leaveAll(final LeaveMode mode) {
 		for (final RaceSession session : new ArrayList<>(this.sessions.values()))
 			this.dispose(session, mode);
+
+		// empty event lobbies (and anything left over) - restores WORLD start signals
+		for (final Heat heat : new ArrayList<>(this.heats.values()))
+			this.cleanupHeat(heat);
+
+		this.heats.clear();
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -129,15 +167,26 @@ public final class RaceManager {
 		return session != null && session.playerId.equals(who.getUniqueId());
 	}
 
+	/** A random ready arena, preferring arenas that have a free instance right now. */
 	public Arena pickRandomReadyArena() {
 		final List<Arena> ready = this.arenas.readyArenas();
+		final List<Arena> free = new ArrayList<>();
 
-		return ready.isEmpty() ? null : ready.get(ThreadLocalRandom.current().nextInt(ready.size()));
+		for (final Arena arena : ready)
+			if (this.freeInstanceWorld(arena, null) != null)
+				free.add(arena);
+
+		final List<Arena> pool = free.isEmpty() ? ready : free;
+
+		return pool.isEmpty() ? null : pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
 	}
 
 	/**
 	 * Joins the arena (or switches to it when the player already races). Silent on success: the player simply
 	 * appears in a boat on the grid.
+	 *
+	 * Order: an open event lobby of the arena with a free grid position -> a free instance of the arena (its own
+	 * world first, then the fallback worlds) -> a random other free arena (fallback.random-free-arena).
 	 */
 	public JoinResult join(final Player player, final Arena arena) {
 		if (this.storage.isBlacklisted(player.getUniqueId())) {
@@ -152,36 +201,74 @@ public final class RaceManager {
 
 		final RaceSession existing = this.sessions.get(player.getUniqueId());
 
-		if (existing != null) {
-			existing.arena = arena;
-			this.startRun(existing);
+		// 1) event lobby
+		final Heat lobby = this.findEvent(arena);
 
-			return existing.disposed ? JoinResult.FAILED : JoinResult.JOINED;
+		if (lobby != null && lobby.phase == Heat.Phase.LOBBY && (lobby.freeSlot() != -1 || (existing != null && existing.heat == lobby))) {
+			if (existing != null && existing.heat == lobby)
+				return JoinResult.JOINED;
+
+			final RaceSession session = existing != null ? existing : this.createSession(player);
+
+			if (session == null)
+				return JoinResult.FAILED;
+
+			this.detach(session);
+			this.attachToEvent(session, lobby);
+
+			return session.disposed ? JoinResult.FAILED : JoinResult.JOINED;
 		}
 
-		// A snapshot left behind by a crash must be restored BEFORE we take a new one
-		PlayerSnapshot.restore(this.plugin, player);
+		// 2) free instance of this arena, 3) another free arena
+		Arena target = arena;
+		String world = this.freeInstanceWorld(arena, existing);
 
-		if (!PlayerSnapshot.save(this.plugin, player)) {
-			Msg.send(player, "race.inventory-save-failed");
+		if (world == null && this.settings.fallbackEnabled && this.settings.fallbackRandomArena) {
+			final List<Arena> candidates = new ArrayList<>();
+
+			for (final Arena other : this.arenas.readyArenas())
+				if (other != arena && this.freeInstanceWorld(other, existing) != null)
+					candidates.add(other);
+
+			if (!candidates.isEmpty()) {
+				target = candidates.get(ThreadLocalRandom.current().nextInt(candidates.size()));
+				world = this.freeInstanceWorld(target, existing);
+			}
+		}
+
+		if (world == null) {
+			Msg.send(player, "race.all-busy", "arena", arena.getName());
+			return JoinResult.BUSY;
+		}
+
+		final RaceSession session = existing != null ? existing : this.createSession(player);
+
+		if (session == null)
 			return JoinResult.FAILED;
-		}
 
-		final RaceSession session = new RaceSession(player.getUniqueId(), arena);
+		this.detach(session);
 
-		this.sessions.put(player.getUniqueId(), session);
+		final Arena instance = world.equals(target.getWorldName()) ? target : target.inWorld(world);
+		final Heat heat = new Heat(instanceKey(target, world), instance, false);
 
-		player.getInventory().clear();
-		player.setGameMode(GameMode.ADVENTURE);
-		player.setFireTicks(0);
+		this.heats.put(heat.key, heat);
 
-		this.giveHotbar(player);
-		this.startRun(session);
+		session.heat = heat;
+		session.slot = instance.getPrimarySpawnIndex();
+		heat.slots.put(session.slot, session);
 
-		return session.disposed ? JoinResult.FAILED : JoinResult.JOINED;
+		this.startSoloRun(session);
+
+		if (session.disposed)
+			return JoinResult.FAILED;
+
+		if (target != arena || !world.equals(arena.getWorldName()))
+			Msg.send(player, "race.redirected", "arena", target.getName(), "world", world, "requested", arena.getName());
+
+		return JoinResult.JOINED;
 	}
 
-	/** /bre leave or the [HUB] button. Silent: no chat output at all. */
+	/** /bre leave or the HUB item. Silent: no chat output at all. */
 	public void leave(final Player player) {
 		final RaceSession session = this.sessions.get(player.getUniqueId());
 
@@ -190,22 +277,28 @@ public final class RaceManager {
 	}
 
 	/**
-	 * /bre reset or the [RESET] button. Silent: no chat output at all.
-	 * Starts a completely fresh attempt - a jumpstart penalty of the current attempt is wiped.
+	 * /bre reset or the RESET item. Silent: no chat output at all.
+	 * Solo: a completely fresh attempt (any penalty is wiped). Event: puts the boat back (grid / last track position),
+	 * an event cannot be restarted by a single racer.
 	 */
 	public void reset(final Player player) {
-		final RaceSession session = this.sessions.get(player.getUniqueId());
+		final RaceSession s = this.sessions.get(player.getUniqueId());
 
-		if (session == null)
+		if (s == null || s.heat == null)
 			return;
 
 		final long now = System.currentTimeMillis();
 
-		if (now - session.lastResetMs < 500L)
+		if (now - s.lastResetMs < 500L)
 			return;
 
-		session.lastResetMs = now;
-		this.startRun(session);
+		s.lastResetMs = now;
+
+		if (!s.heat.event)
+			this.startSoloRun(s);
+
+		else if (s.state == RaceSession.State.LOBBY || s.state == RaceSession.State.RUNNING)
+			this.rescue(s);
 	}
 
 	/** Runs the action of a hotbar button, returns false if the item is not a race button. */
@@ -229,100 +322,212 @@ public final class RaceManager {
 	}
 
 	// ------------------------------------------------------------------------------------------
-	// Run start (join + reset share this)
+	// Events (multiplayer start)
 	// ------------------------------------------------------------------------------------------
 
-	private void startRun(final RaceSession s) {
-		final Player player = Bukkit.getPlayer(s.playerId);
+	/** Opens an event lobby on a free instance of the arena. Joining players then take grid positions 1, 2, 3 ... */
+	public EventResult openEvent(final Arena arena) {
+		if (this.findEvent(arena) != null)
+			return EventResult.ALREADY_OPEN;
 
-		if (player == null || !player.isOnline()) {
-			this.dispose(s, LeaveMode.SILENT);
-			return;
-		}
+		if (!arena.isReady())
+			return EventResult.NOT_READY;
 
-		final Location spawn = s.arena.getSpawn() == null ? null : s.arena.getSpawn().toLocation();
+		final String world = this.freeInstanceWorld(arena, null);
 
-		if (spawn == null) {
-			Msg.send(player, "race.world-not-loaded");
-			this.dispose(s, LeaveMode.HUB);
-			return;
-		}
+		if (world == null)
+			return EventResult.BUSY;
 
-		// 1) kill the old boat right away (no entity spam), cancel old timers, restore fake lamps
-		this.cleanupRun(s);
+		final Arena instance = world.equals(arena.getWorldName()) ? arena : arena.inWorld(world);
+		final Heat heat = new Heat(instanceKey(arena, world), instance, true);
 
-		// 2) reset the run state - EVERYTHING, including any jumpstart penalty (it must never leak into a new attempt)
-		s.state = RaceSession.State.COUNTDOWN;
-		s.startNanos = 0L;
-		s.penaltyMs = 0L;
-		s.falstarted = false;
-		s.litLamps = 0;
-		s.lampCount = 0;
-		s.crossedStart = false;
-		s.nextCheckpoint = 0;
-		s.splits = new long[s.arena.getCheckpoints().size()];
-		s.finalMs = 0L;
-		s.deltaText = "";
-		s.restartQueued = false;
+		this.heats.put(heat.key, heat);
+		this.loadVisuals(heat);
 
-		final Region start = s.arena.getStartLine();
-		final Region finish = s.arena.getFinishLine();
-
-		s.inStartZone = start != null && start.contains(spawn);
-		s.inFinishZone = finish != null && finish.contains(spawn);
-
-		final RaceRecord best = this.storage.getRecord(s.arena.getName(), s.playerId);
-
-		s.bestTotalMs = best == null ? -1L : best.getBestMs();
-		s.referenceSplits = best == null || best.getSplits().length == 0 ? null : best.getSplits();
-
-		// 3) teleport the player to the start and seat them in a brand-new boat
-		s.internalTeleport = true;
-
-		try {
-			player.teleport(spawn);
-		} finally {
-			s.internalTeleport = false;
-		}
-
-		final Entity spawned = spawn.getWorld().spawnEntity(spawn, this.settings.boatType);
-
-		if (!(spawned instanceof Boat boat)) {
-			spawned.remove();
-			Msg.send(player, "race.boat-spawn-failed");
-			this.dispose(s, LeaveMode.HUB);
-			return;
-		}
-
-		boat.setInvulnerable(true);
-		boat.setPersistent(false);
-
-		s.boat = boat;
-		s.holdPos = boat.getLocation().clone();
-		this.boats.put(boat.getUniqueId(), s);
-
-		boat.addPassenger(player);
-		player.setFireTicks(0);
-
-		// 4) F1 start lights
-		this.beginCountdown(s);
+		return EventResult.OPENED;
 	}
 
-	/** Cancels timers, restores the fake lamp blocks and kills the boat. Does not touch the session maps. */
-	private void cleanupRun(final RaceSession s) {
-		for (final BukkitTask task : s.tasks)
-			task.cancel();
+	/** /bre start <arena>: starts the lights of the event lobby. */
+	public EventResult startEvent(final Arena arena) {
+		final Heat heat = this.findEvent(arena);
 
-		s.tasks.clear();
+		if (heat == null)
+			return EventResult.NO_EVENT;
 
-		this.revertLamps(s);
+		if (heat.phase != Heat.Phase.LOBBY)
+			return EventResult.ALREADY_STARTED;
 
-		if (s.boat != null) {
-			// Removing it from the index first makes the VehicleExitEvent caused by remove() a no-op
-			this.boats.remove(s.boat.getUniqueId());
+		if (heat.slots.isEmpty())
+			return EventResult.EMPTY;
 
-			s.boat.remove();
-			s.boat = null;
+		this.startEventCountdown(heat);
+
+		return EventResult.STARTED;
+	}
+
+	/** Sends every event racer to the hub and frees the instance. */
+	public EventResult closeEvent(final Arena arena) {
+		final Heat heat = this.findEvent(arena);
+
+		if (heat == null)
+			return EventResult.NO_EVENT;
+
+		for (final RaceSession racer : heat.racers())
+			this.dispose(racer, LeaveMode.HUB);
+
+		this.cleanupHeat(heat);
+		this.heats.remove(heat.key);
+
+		return EventResult.CLOSED;
+	}
+
+	/** @return the current event of the arena, or null */
+	public EventInfo eventInfo(final Arena arena) {
+		final Heat heat = this.findEvent(arena);
+
+		if (heat == null)
+			return null;
+
+		return new EventInfo(heat.arena.getWorldName(), heat.phase.name(), heat.slots.size(), heat.capacity());
+	}
+
+	private Heat findEvent(final Arena arena) {
+		for (final Heat heat : this.heats.values())
+			if (heat.event && heat.arena.getName().equalsIgnoreCase(arena.getName()))
+				return heat;
+
+		return null;
+	}
+
+	private void attachToEvent(final RaceSession s, final Heat heat) {
+		final int slot = heat.freeSlot();
+
+		s.heat = heat;
+		s.slot = slot;
+		heat.slots.put(slot, s);
+
+		this.resetRunState(s);
+		s.state = RaceSession.State.LOBBY;
+
+		if (!this.place(s, this.spawnOf(s)))
+			return;
+
+		final Player player = Bukkit.getPlayer(s.playerId);
+
+		if (player != null) {
+			this.showLamps(player, heat, 0);
+			this.showSignalIdle(player, heat);
+		}
+
+		if (this.settings.eventAutoStartWhenFull && heat.freeSlot() == -1)
+			this.startEventCountdown(heat);
+	}
+
+	private void startEventCountdown(final Heat heat) {
+		if (heat.phase != Heat.Phase.LOBBY)
+			return;
+
+		heat.phase = Heat.Phase.COUNTDOWN;
+
+		for (final RaceSession racer : heat.racers()) {
+			racer.state = RaceSession.State.COUNTDOWN;
+
+			final Player player = Bukkit.getPlayer(racer.playerId);
+
+			if (player != null)
+				Msg.title(player, "event-start");
+		}
+
+		this.beginCountdown(heat, this.settings.eventStartDelayTicks);
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Instances (arena + world) / fallback maps
+	// ------------------------------------------------------------------------------------------
+
+	private static String instanceKey(final Arena arena, final String world) {
+		return arena.getName().toLowerCase(Locale.ROOT) + "@" + world;
+	}
+
+	/** The arena's own world first, then the configured fallback worlds (only loaded worlds). */
+	private List<String> instanceWorlds(final Arena arena) {
+		final List<String> worlds = new ArrayList<>();
+		final String own = arena.getWorldName();
+
+		if (own != null && Bukkit.getWorld(own) != null)
+			worlds.add(own);
+
+		if (this.settings.fallbackEnabled)
+			for (final String world : this.settings.fallbackWorldsOf(arena.getName()))
+				if (!worlds.contains(world) && Bukkit.getWorld(world) != null)
+					worlds.add(world);
+
+		return worlds;
+	}
+
+	/**
+	 * @param owner its own solo heat counts as free (switching / re-joining the same arena), may be null
+	 * @return a world in which the arena is free, or null
+	 */
+	private String freeInstanceWorld(final Arena arena, final RaceSession owner) {
+		for (final String world : this.instanceWorlds(arena)) {
+			final Heat heat = this.heats.get(instanceKey(arena, world));
+
+			if (heat == null || (owner != null && heat == owner.heat && !heat.event))
+				return world;
+		}
+
+		return null;
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Sessions
+	// ------------------------------------------------------------------------------------------
+
+	/** Saves the inventory, gives the race kit. @return null when the snapshot could not be written */
+	private RaceSession createSession(final Player player) {
+		// A snapshot left behind by a crash must be restored BEFORE we take a new one
+		PlayerSnapshot.restore(this.plugin, player);
+
+		if (!PlayerSnapshot.save(this.plugin, player)) {
+			Msg.send(player, "race.inventory-save-failed");
+			return null;
+		}
+
+		final RaceSession session = new RaceSession(player.getUniqueId());
+
+		this.sessions.put(player.getUniqueId(), session);
+
+		player.getInventory().clear();
+		player.setGameMode(GameMode.ADVENTURE);
+		player.setFireTicks(0);
+
+		this.giveHotbar(player);
+
+		return session;
+	}
+
+	/** Takes the racer out of its heat (boat, timers, client-side blocks). The heat is freed when it becomes empty. */
+	private void detach(final RaceSession s) {
+		final Heat heat = s.heat;
+
+		this.cleanupSession(s);
+
+		if (heat == null)
+			return;
+
+		final Player player = Bukkit.getPlayer(s.playerId);
+
+		if (player != null)
+			this.revertVisuals(player, heat);
+
+		heat.slots.remove(s.slot);
+		s.heat = null;
+
+		// An empty event lobby stays open; everything else is freed
+		if (heat.slots.isEmpty() && !(heat.event && heat.phase == Heat.Phase.LOBBY) && this.heats.get(heat.key) == heat) {
+			this.cleanupHeat(heat);
+			this.heats.remove(heat.key);
 		}
 	}
 
@@ -332,7 +537,7 @@ public final class RaceManager {
 
 		s.disposed = true;
 		this.sessions.remove(s.playerId);
-		this.cleanupRun(s);
+		this.detach(s);
 
 		final Player player = Bukkit.getPlayer(s.playerId);
 
@@ -357,27 +562,186 @@ public final class RaceManager {
 		}
 	}
 
+	/** Cancels the racer's own timers and kills the boat. */
+	private void cleanupSession(final RaceSession s) {
+		for (final BukkitTask task : s.tasks)
+			task.cancel();
+
+		s.tasks.clear();
+		this.removeBoat(s);
+	}
+
+	private void removeBoat(final RaceSession s) {
+		if (s.boat != null) {
+			// Removing it from the index first makes the VehicleExitEvent caused by remove() a no-op
+			this.boats.remove(s.boat.getUniqueId());
+
+			s.boat.remove();
+			s.boat = null;
+		}
+	}
+
+	private void resetRunState(final RaceSession s) {
+		for (final BukkitTask task : s.tasks)
+			task.cancel();
+
+		s.tasks.clear();
+
+		s.state = RaceSession.State.COUNTDOWN;
+		s.penaltyMs = 0L;
+		s.falstarted = false;
+		s.crossedStart = false;
+		s.nextCheckpoint = 0;
+		s.splits = new long[s.heat.arena.getCheckpoints().size()];
+		s.finalMs = 0L;
+		s.deltaText = "";
+		s.restartQueued = false;
+		s.lastTrackPos = null;
+		s.offTrack = false;
+		s.offTrackTicks = 0;
+
+		final RaceRecord best = this.storage.getRecord(s.heat.arena.getName(), s.playerId);
+
+		s.bestTotalMs = best == null ? -1L : best.getBestMs();
+		s.referenceSplits = best == null || best.getSplits().length == 0 ? null : best.getSplits();
+	}
+
+	private Location spawnOf(final RaceSession s) {
+		Point point = s.heat.arena.getSpawns().get(s.slot);
+
+		if (point == null)
+			point = s.heat.arena.getPrimarySpawn();
+
+		return point == null ? null : point.toLocation();
+	}
+
 	// ------------------------------------------------------------------------------------------
-	// Start lights
+	// Solo run (join + reset)
 	// ------------------------------------------------------------------------------------------
 
-	private void beginCountdown(final RaceSession s) {
-		for (final Region lamp : s.arena.getLights())
-			s.lampBlocks.add(lamp.blocks());
+	private void startSoloRun(final RaceSession s) {
+		final Heat heat = s.heat;
 
-		s.lampCount = s.lampBlocks.isEmpty() ? this.settings.lamps : s.lampBlocks.size();
+		// cancel the old countdown, restore fake blocks, fresh state - including any penalty
+		this.cleanupHeat(heat);
+		this.resetRunState(s);
 
+		if (!this.place(s, this.spawnOf(s)))
+			return;
+
+		this.loadVisuals(heat);
+		this.beginCountdown(heat, 0);
+	}
+
+	/**
+	 * Teleports the player to {@code location} and seats them in a brand-new boat (old boat removed first).
+	 *
+	 * @return false when the racer had to leave (offline, world not loaded, boat could not spawn)
+	 */
+	private boolean place(final RaceSession s, final Location location) {
 		final Player player = Bukkit.getPlayer(s.playerId);
 
-		if (player != null)
-			this.showLamps(player, s, 0); // all dark before the sequence starts
+		if (player == null || !player.isOnline()) {
+			this.dispose(s, LeaveMode.SILENT);
+			return false;
+		}
 
-		long delay = this.settings.firstDelayTicks;
+		if (location == null || location.getWorld() == null) {
+			Msg.send(player, "race.world-not-loaded");
+			this.dispose(s, LeaveMode.HUB);
+			return false;
+		}
 
-		for (int lit = 1; lit <= s.lampCount; lit++) {
+		this.removeBoat(s);
+
+		s.internalTeleport = true;
+
+		try {
+			player.teleport(location);
+		} finally {
+			s.internalTeleport = false;
+		}
+
+		final Entity spawned = location.getWorld().spawnEntity(location, this.settings.boatType);
+
+		if (!(spawned instanceof Boat boat)) {
+			spawned.remove();
+			Msg.send(player, "race.boat-spawn-failed");
+			this.dispose(s, LeaveMode.HUB);
+			return false;
+		}
+
+		boat.setInvulnerable(true);
+		boat.setPersistent(false);
+
+		s.boat = boat;
+		s.holdPos = boat.getLocation().clone();
+		s.restartQueued = false;
+		this.boats.put(boat.getUniqueId(), s);
+
+		boat.addPassenger(player);
+		player.setFireTicks(0);
+
+		final Region start = s.heat.arena.getStartLine();
+		final Region finish = s.heat.arena.getFinishLine();
+
+		s.inStartZone = start != null && start.contains(location);
+		s.inFinishZone = finish != null && finish.contains(location);
+
+		return true;
+	}
+
+	/**
+	 * Puts the boat back without touching the clock: on the grid while waiting for the start, otherwise on the last
+	 * position on a track block. Used for events (which cannot be restarted) and for off-track TELEPORT_BACK.
+	 */
+	private void rescue(final RaceSession s) {
+		final boolean waiting = s.state == RaceSession.State.LOBBY || s.state == RaceSession.State.COUNTDOWN;
+		final Location target = !waiting && s.lastTrackPos != null ? s.lastTrackPos : this.spawnOf(s);
+
+		this.place(s, target);
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Start lights + start signal
+	// ------------------------------------------------------------------------------------------
+
+	/** Loads the lamp / start signal block locations of the heat's instance. */
+	private void loadVisuals(final Heat heat) {
+		if (heat.lampBlocks.isEmpty())
+			for (final Region lamp : heat.arena.getLights())
+				heat.lampBlocks.add(lamp.blocks());
+
+		heat.signalBlocks.clear();
+
+		if (this.settings.signalEnabled && heat.arena.getStartSignal() != null)
+			heat.signalBlocks.addAll(heat.arena.getStartSignal().blocks());
+	}
+
+	private void beginCountdown(final Heat heat, final long extraDelay) {
+		heat.phase = Heat.Phase.COUNTDOWN;
+		heat.litLamps = 0;
+
+		this.loadVisuals(heat);
+		heat.lampCount = heat.lampBlocks.isEmpty() ? this.settings.lamps : heat.lampBlocks.size();
+
+		for (final RaceSession racer : heat.racers()) {
+			racer.state = RaceSession.State.COUNTDOWN;
+
+			final Player player = Bukkit.getPlayer(racer.playerId);
+
+			if (player != null) {
+				this.showLamps(player, heat, 0); // all dark before the sequence starts
+				this.showSignalIdle(player, heat);
+			}
+		}
+
+		long delay = extraDelay + this.settings.firstDelayTicks;
+
+		for (int lit = 1; lit <= heat.lampCount; lit++) {
 			final int litLamps = lit;
 
-			this.later(s, delay, () -> this.lampOn(s, litLamps));
+			this.later(heat, delay, () -> this.lampOn(heat, litLamps));
 			delay += this.settings.intervalTicks;
 		}
 
@@ -385,66 +749,171 @@ public final class RaceManager {
 		final long lastLamp = delay - this.settings.intervalTicks;
 		final int hold = ThreadLocalRandom.current().nextInt(this.settings.holdMinTicks, this.settings.holdMaxTicks + 1);
 
-		this.later(s, lastLamp + Math.max(this.settings.intervalTicks, hold), () -> this.lightsOut(s));
+		this.later(heat, lastLamp + Math.max(this.settings.intervalTicks, hold), () -> this.lightsOut(heat));
 	}
 
-	private void lampOn(final RaceSession s, final int lit) {
-		final Player player = Bukkit.getPlayer(s.playerId);
-
-		if (player == null || s.disposed || s.state != RaceSession.State.COUNTDOWN)
-			return;
-
-		s.litLamps = lit;
-		this.showLamps(player, s, lit);
-
-		final float pitch = 0.6F + 0.8F * ((float) lit / (float) s.lampCount);
-
-		player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1.0F, pitch);
+	private boolean alive(final Heat heat) {
+		return this.heats.get(heat.key) == heat;
 	}
 
-	private void lightsOut(final RaceSession s) {
-		final Player player = Bukkit.getPlayer(s.playerId);
-
-		if (player == null || s.disposed || s.state != RaceSession.State.COUNTDOWN)
+	private void lampOn(final Heat heat, final int lit) {
+		if (!this.alive(heat) || heat.phase != Heat.Phase.COUNTDOWN)
 			return;
 
-		// All lamps turn black = GO. They stay black (they are only reverted on reset / leave).
-		this.showLamps(player, s, 0);
+		heat.litLamps = lit;
 
-		s.state = RaceSession.State.RUNNING;
-		s.startNanos = System.nanoTime();
-		s.restartFailures = 0;
+		final float pitch = 0.6F + 0.8F * ((float) lit / (float) heat.lampCount);
 
-		// Fallback for a misconfigured spawn that lies inside the start line: the racer is already on the line
-		if (s.inStartZone)
-			s.crossedStart = true;
+		for (final RaceSession racer : heat.racers()) {
+			final Player player = Bukkit.getPlayer(racer.playerId);
 
-		player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0F, 1.5F);
-		Msg.title(player, "go");
+			if (player != null) {
+				this.showLamps(player, heat, lit);
+				player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1.0F, pitch);
+			}
+		}
+	}
+
+	private void lightsOut(final Heat heat) {
+		if (!this.alive(heat) || heat.phase != Heat.Phase.COUNTDOWN)
+			return;
+
+		heat.phase = Heat.Phase.RACING;
+		heat.startNanos = System.nanoTime();
+		heat.fieldSize = heat.slots.size();
+
+		for (final RaceSession racer : heat.racers()) {
+			if (racer.state != RaceSession.State.COUNTDOWN)
+				continue;
+
+			racer.state = RaceSession.State.RUNNING;
+			racer.restartFailures = 0;
+
+			// Fallback for a misconfigured spawn that lies inside the start line: the racer is already on the line
+			if (racer.inStartZone)
+				racer.crossedStart = true;
+
+			final Player player = Bukkit.getPlayer(racer.playerId);
+
+			if (player != null) {
+				// All lamps turn black = GO. They stay black (they are only reverted on reset / leave).
+				this.showLamps(player, heat, 0);
+				player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0F, 1.5F);
+				Msg.title(player, "go");
+			}
+		}
+
+		this.signalGreen(heat);
 	}
 
 	/** Shows the first {@code lit} lamps lit and the rest dark - only to this player. */
-	private void showLamps(final Player player, final RaceSession s, final int lit) {
-		for (int i = 0; i < s.lampBlocks.size(); i++) {
+	private void showLamps(final Player player, final Heat heat, final int lit) {
+		for (int i = 0; i < heat.lampBlocks.size(); i++) {
 			final BlockData data = i < lit ? this.settings.lampOn : this.settings.lampOff;
 
-			for (final Location location : s.lampBlocks.get(i))
+			for (final Location location : heat.lampBlocks.get(i))
 				player.sendBlockChange(location, data);
 		}
 	}
 
-	private void revertLamps(final RaceSession s) {
-		if (s.lampBlocks.isEmpty())
+	/** CLIENT mode: the start signal shows the off block (if one is configured) while waiting for lights out. */
+	private void showSignalIdle(final Player player, final Heat heat) {
+		if (this.settings.signalMode != Settings.SignalMode.CLIENT || this.settings.signalOff == null)
 			return;
 
-		final Player player = Bukkit.getPlayer(s.playerId);
+		for (final Location location : heat.signalBlocks)
+			player.sendBlockChange(location, this.settings.signalOff);
+	}
 
-		if (player != null)
-			for (final List<Location> lamp : s.lampBlocks)
-				for (final Location location : lamp)
-					player.sendBlockChange(location, location.getBlock().getBlockData());
+	/** Lights out: the start signal turns green, and back to "off" after the configured duration. */
+	private void signalGreen(final Heat heat) {
+		if (heat.signalBlocks.isEmpty())
+			return;
 
-		s.lampBlocks.clear();
+		if (this.settings.signalMode == Settings.SignalMode.WORLD) {
+			for (final Location location : heat.signalBlocks) {
+				final Block block = location.getBlock();
+
+				heat.signalOriginal.putIfAbsent(location, block.getBlockData());
+				block.setBlockData(this.settings.signalGo, false);
+			}
+
+		} else
+			for (final RaceSession racer : heat.racers()) {
+				final Player player = Bukkit.getPlayer(racer.playerId);
+
+				if (player != null)
+					for (final Location location : heat.signalBlocks)
+						player.sendBlockChange(location, this.settings.signalGo);
+			}
+
+		heat.signalGreen = true;
+		this.later(heat, this.settings.signalDurationTicks, () -> this.signalOff(heat));
+	}
+
+	private void signalOff(final Heat heat) {
+		if (!heat.signalGreen)
+			return;
+
+		heat.signalGreen = false;
+
+		if (this.settings.signalMode == Settings.SignalMode.WORLD) {
+			for (final Map.Entry<Location, BlockData> entry : heat.signalOriginal.entrySet())
+				entry.getKey().getBlock().setBlockData(this.settings.signalOff != null ? this.settings.signalOff : entry.getValue(), false);
+
+			heat.signalOriginal.clear();
+
+		} else
+			for (final RaceSession racer : heat.racers()) {
+				final Player player = Bukkit.getPlayer(racer.playerId);
+
+				if (player != null)
+					for (final Location location : heat.signalBlocks)
+						player.sendBlockChange(location, this.settings.signalOff != null ? this.settings.signalOff : location.getBlock().getBlockData());
+			}
+	}
+
+	/** Shows the real blocks again to this player (lamps + CLIENT start signal). */
+	private void revertVisuals(final Player player, final Heat heat) {
+		for (final List<Location> lamp : heat.lampBlocks)
+			for (final Location location : lamp)
+				player.sendBlockChange(location, location.getBlock().getBlockData());
+
+		if (this.settings.signalMode == Settings.SignalMode.CLIENT)
+			for (final Location location : heat.signalBlocks)
+				player.sendBlockChange(location, location.getBlock().getBlockData());
+	}
+
+	/** Cancels the countdown, restores every fake / changed block of the heat. Keeps the racers. */
+	private void cleanupHeat(final Heat heat) {
+		for (final BukkitTask task : heat.tasks)
+			task.cancel();
+
+		heat.tasks.clear();
+
+		// WORLD mode: never leave the "go" blocks in the world
+		if (heat.signalGreen && this.settings.signalMode == Settings.SignalMode.WORLD) {
+			for (final Map.Entry<Location, BlockData> entry : heat.signalOriginal.entrySet())
+				entry.getKey().getBlock().setBlockData(entry.getValue(), false);
+
+			heat.signalOriginal.clear();
+		}
+
+		heat.signalGreen = false;
+
+		for (final RaceSession racer : heat.racers()) {
+			final Player player = Bukkit.getPlayer(racer.playerId);
+
+			if (player != null)
+				this.revertVisuals(player, heat);
+		}
+
+		heat.lampBlocks.clear();
+		heat.litLamps = 0;
+	}
+
+	private void later(final Heat heat, final long delayTicks, final Runnable runnable) {
+		heat.tasks.add(Bukkit.getScheduler().runTaskLater(this.plugin, runnable, delayTicks));
 	}
 
 	private void later(final RaceSession s, final long delayTicks, final Runnable runnable) {
@@ -458,7 +927,7 @@ public final class RaceManager {
 	public void handleVehicleMove(final Vehicle vehicle, final Location from, final Location to) {
 		final RaceSession s = this.boats.get(vehicle.getUniqueId());
 
-		if (s == null || s.disposed)
+		if (s == null || s.disposed || s.heat == null)
 			return;
 
 		final Player player = Bukkit.getPlayer(s.playerId);
@@ -467,26 +936,27 @@ public final class RaceManager {
 			return;
 
 		switch (s.state) {
-			case COUNTDOWN -> this.handleCountdownMove(s, player, from, to);
+			case LOBBY, COUNTDOWN -> this.handleWaitingMove(s, player, from, to);
 			case RUNNING -> this.handleRunningMove(s, player, from, to);
 			default -> {
 			}
 		}
 	}
 
-	private void handleCountdownMove(final RaceSession s, final Player player, final Location from, final Location to) {
+	private void handleWaitingMove(final RaceSession s, final Player player, final Location from, final Location to) {
 		if (s.holdPos == null || to.getWorld() != s.holdPos.getWorld())
 			return;
 
-		// crossing the start line before lights out
-		final Region start = s.arena.getStartLine();
+		// a jump start is only possible once the lights sequence runs (not in an event lobby)
+		final boolean countdown = s.state == RaceSession.State.COUNTDOWN;
+		final Region start = s.heat.arena.getStartLine();
 
 		if (start != null) {
 			final boolean wasIn = s.inStartZone;
 
 			s.inStartZone = start.contains(to);
 
-			if (!wasIn && start.intersects(from, to))
+			if (countdown && !wasIn && start.intersects(from, to))
 				this.jumpstart(s, player);
 		}
 
@@ -494,7 +964,7 @@ public final class RaceManager {
 		final double dz = to.getZ() - s.holdPos.getZ();
 		final double distanceSquared = dx * dx + dz * dz;
 
-		if (distanceSquared > 0.25D) // moved more than half a block
+		if (countdown && distanceSquared > 0.25D) // moved more than half a block
 			this.jumpstart(s, player);
 
 		// keep the boat on the grid
@@ -514,10 +984,10 @@ public final class RaceManager {
 
 	/** Dynamic penalty: the earlier the jumpstart (fewer lamps lit), the higher the penalty. */
 	private void jumpstart(final RaceSession s, final Player player) {
-		if (s.state != RaceSession.State.COUNTDOWN || s.falstarted)
+		if (s.state != RaceSession.State.COUNTDOWN || s.heat.phase != Heat.Phase.COUNTDOWN || s.falstarted)
 			return;
 
-		final long penalty = this.settings.penaltyFor(s.litLamps, s.lampCount);
+		final long penalty = this.settings.penaltyFor(s.heat.litLamps, s.heat.lampCount);
 
 		s.falstarted = true;
 		s.penaltyMs = penalty;
@@ -527,15 +997,16 @@ public final class RaceManager {
 	}
 
 	private void handleRunningMove(final RaceSession s, final Player player, final Location from, final Location to) {
-		final Region start = s.arena.getStartLine();
-		final Region finish = s.arena.getFinishLine();
+		final Arena arena = s.heat.arena;
+		final Region start = arena.getStartLine();
+		final Region finish = arena.getFinishLine();
 
 		if (start == null || finish == null)
 			return;
 
 		// Edge detection: "entered" = was outside after the previous move and touches the zone during this one
-		final boolean startEntered = this.entered(start, s.inStartZone, from, to);
-		final boolean finishEntered = this.entered(finish, s.inFinishZone, from, to);
+		final boolean startEntered = !s.inStartZone && start.intersects(from, to);
+		final boolean finishEntered = !s.inFinishZone && finish.intersects(from, to);
 
 		s.inStartZone = start.contains(to);
 		s.inFinishZone = finish.contains(to);
@@ -549,7 +1020,7 @@ public final class RaceManager {
 		}
 
 		// 2) next checkpoint in order (invisible - nothing is ever displayed in the world)
-		final List<Region> checkpoints = s.arena.getCheckpoints();
+		final List<Region> checkpoints = arena.getCheckpoints();
 
 		// The run only counts the checkpoints that existed when it started (an admin may add more while it is running)
 		final int total = Math.min(checkpoints.size(), s.splits.length);
@@ -571,12 +1042,12 @@ public final class RaceManager {
 			Msg.title(player, "missed-checkpoint", "checkpoint", s.nextCheckpoint + 1, "total", total);
 			player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.0F, 0.8F);
 
+			if (s.heat.event)
+				// an event cannot be restarted - back to the last checkpoint is not tracked, so the lap simply does not count
+				return;
+
 			this.queueRestart(s);
 		}
-	}
-
-	private boolean entered(final Region region, final boolean wasInside, final Location from, final Location to) {
-		return !wasInside && region.intersects(from, to);
 	}
 
 	/**
@@ -599,11 +1070,13 @@ public final class RaceManager {
 		s.state = RaceSession.State.FINISHED;
 		s.finalMs = this.elapsedMs(s);
 
-		final String arena = s.arena.getName();
+		final Heat heat = s.heat;
+		final String arena = heat.arena.getName();
 		final long previousBest = s.bestTotalMs;
 		final boolean blacklisted = this.storage.isBlacklisted(s.playerId);
 		final boolean newBest = this.storage.submitIfBetter(arena, s.playerId, player.getName(), s.finalMs, s.splits.clone());
 		final boolean rewarded = !blacklisted && this.giveReward(s, player);
+		final int position = heat.event ? ++heat.finishedCount : 0;
 
 		final String summary;
 
@@ -627,7 +1100,8 @@ public final class RaceManager {
 				"best", previousBest > 0L ? TimeFmt.format(previousBest) : "-",
 				"delta", TimeFmt.delta(deltaMs),
 				"rank", Math.max(0, this.storage.getRank(arena, s.playerId)),
-				"reward_note", rewarded ? Msg.text("finish.reward-note", "arena", arena) : "");
+				"reward_note", rewarded ? Msg.text("finish.reward-note", "arena", arena) : "",
+				"event_note", heat.event ? Msg.text("finish.event-note", "position", position, "racers", heat.fieldSize) : "");
 
 		// Shown on the action bar during the pause before the teleport
 		s.deltaText = previousBest > 0L ? deltaText(deltaMs) : "";
@@ -647,13 +1121,104 @@ public final class RaceManager {
 		return Msg.text(deltaMs <= 0L ? "delta.faster" : "delta.slower", "delta", TimeFmt.delta(deltaMs), "delta_padded", TimeFmt.deltaPadded(deltaMs));
 	}
 
+	private long elapsedMs(final RaceSession s) {
+		return (System.nanoTime() - s.heat.startNanos) / 1_000_000L + s.penaltyMs;
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Off-track detection
+	// ------------------------------------------------------------------------------------------
+
+	private void checkOffTrack(final RaceSession s, final Player player) {
+		final Set<Material> allowed = s.heat.arena.getTrackBlocks().isEmpty() ? this.settings.defaultTrackBlocks : s.heat.arena.getTrackBlocks();
+
+		if (allowed.isEmpty() || s.boat == null)
+			return;
+
+		final Location location = s.boat.getLocation();
+		final Material below = this.blockBelow(location);
+
+		// airborne (jump, drop) - neither on nor off the track
+		if (below == null)
+			return;
+
+		if (allowed.contains(below)) {
+			s.offTrackTicks = 0;
+			s.offTrack = false;
+			s.lastTrackPos = location.clone();
+			return;
+		}
+
+		s.offTrackTicks += this.settings.offTrackIntervalTicks;
+
+		if (s.offTrack || s.offTrackTicks < this.settings.offTrackGraceTicks)
+			return;
+
+		s.offTrack = true;
+
+		final long penalty = this.settings.offTrackPenaltyMs;
+		Settings.OffTrackAction action = this.settings.offTrackAction;
+
+		// an event cannot be restarted
+		if (action == Settings.OffTrackAction.RESET && s.heat.event)
+			action = Settings.OffTrackAction.TELEPORT_BACK;
+
+		player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1.0F, 0.6F);
+
+		switch (action) {
+			case PENALTY -> {
+				s.penaltyMs += penalty;
+
+				Msg.title(player, "off-track", "penalty", TimeFmt.delta(penalty));
+				Msg.send(player, "race.off-track", "penalty", TimeFmt.delta(penalty));
+			}
+			case TELEPORT_BACK -> {
+				s.penaltyMs += penalty;
+
+				Msg.title(player, "off-track-back", "penalty", TimeFmt.delta(penalty));
+				Msg.send(player, "race.off-track-back", "penalty", TimeFmt.delta(penalty));
+
+				this.rescue(s);
+				s.offTrack = false;
+				s.offTrackTicks = 0;
+			}
+			case RESET -> {
+				Msg.title(player, "off-track-reset");
+				Msg.send(player, "race.off-track-reset");
+
+				this.queueRestart(s);
+			}
+		}
+	}
+
+	/** Material of the first non-air block under the boat (scan-depth blocks deep), or null when airborne. */
+	private Material blockBelow(final Location location) {
+		final World world = location.getWorld();
+
+		if (world == null)
+			return null;
+
+		final int x = location.getBlockX();
+		final int z = location.getBlockZ();
+		final int top = (int) Math.floor(location.getY() - 0.1D);
+
+		for (int depth = 0; depth < this.settings.offTrackScanDepth; depth++) {
+			final Material type = world.getBlockAt(x, top - depth, z).getType();
+
+			if (!type.isAir())
+				return type;
+		}
+
+		return null;
+	}
+
 	// ------------------------------------------------------------------------------------------
 	// Rewards
 	// ------------------------------------------------------------------------------------------
 
 	/** @return true when reward commands were executed */
 	private boolean giveReward(final RaceSession s, final Player player) {
-		final Arena arena = s.arena;
+		final Arena arena = s.heat.arena;
 		final List<String> commands = arena.getRewardCommands();
 
 		if (commands.isEmpty())
@@ -697,15 +1262,11 @@ public final class RaceManager {
 		return true;
 	}
 
-	private long elapsedMs(final RaceSession s) {
-		return (System.nanoTime() - s.startNanos) / 1_000_000L + s.penaltyMs;
-	}
-
 	// ------------------------------------------------------------------------------------------
 	// Boat exit / quit / foreign teleports
 	// ------------------------------------------------------------------------------------------
 
-	/** The racer left the boat: boat gets removed and the player is sent back to the start (fresh attempt). */
+	/** The racer left the boat: solo = fresh attempt, event = a new boat without touching the clock. */
 	public void handleVehicleExit(final Vehicle vehicle, final Entity exited) {
 		final RaceSession s = this.boats.get(vehicle.getUniqueId());
 
@@ -727,10 +1288,15 @@ public final class RaceManager {
 
 		// next tick - never remove / teleport inside the event that triggered this
 		Bukkit.getScheduler().runTask(this.plugin, () -> {
-			if (s.disposed || this.sessions.get(s.playerId) != s)
+			if (s.disposed || this.sessions.get(s.playerId) != s || s.heat == null)
 				return;
 
-			this.startRun(s);
+			s.restartQueued = false;
+
+			if (s.heat.event)
+				this.rescue(s);
+			else
+				this.startSoloRun(s);
 		});
 	}
 
@@ -774,15 +1340,17 @@ public final class RaceManager {
 	}
 
 	// ------------------------------------------------------------------------------------------
-	// Action bar ticker
+	// Ticker: action bar (every tick) + off-track check
 	// ------------------------------------------------------------------------------------------
 
 	private void tick() {
 		if (this.sessions.isEmpty())
 			return;
 
+		final boolean offTrackTick = this.settings.offTrackEnabled && ++this.tickCounter % this.settings.offTrackIntervalTicks == 0;
+
 		for (final RaceSession s : new ArrayList<>(this.sessions.values())) {
-			if (s.disposed)
+			if (s.disposed || s.heat == null)
 				continue;
 
 			final Player player = Bukkit.getPlayer(s.playerId);
@@ -807,7 +1375,15 @@ public final class RaceManager {
 				}
 			}
 
+			if (offTrackTick && s.state == RaceSession.State.RUNNING && s.crossedStart && !s.restartQueued)
+				this.checkOffTrack(s, player);
+
+			if (s.disposed || s.heat == null)
+				continue;
+
 			switch (s.state) {
+				case LOBBY -> Msg.actionBar(player, "actionbar.lobby", "time", TimeFmt.format(0L),
+						"players", s.heat.slots.size(), "slots", s.heat.capacity(), "position", s.slot);
 				case COUNTDOWN -> {
 					if (s.penaltyMs > 0L)
 						Msg.actionBar(player, "actionbar.countdown-penalty", "time", TimeFmt.format(0L), "penalty", TimeFmt.delta(s.penaltyMs));

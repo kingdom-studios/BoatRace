@@ -10,6 +10,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Level;
 
+import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -93,12 +94,40 @@ public final class ArenaManager {
 
 			final Arena arena = new Arena(name);
 
-			arena.setSpawn(Point.load(section.getConfigurationSection("spawn")));
+			// grid positions; "spawn" is the single spawn of older versions = position #1
+			final ConfigurationSection spawns = section.getConfigurationSection("spawns");
+
+			if (spawns != null)
+				for (final String index : spawns.getKeys(false))
+					try {
+						final Point point = Point.load(spawns.getConfigurationSection(index));
+
+						if (point != null)
+							arena.getSpawns().put(Integer.parseInt(index), point);
+
+					} catch (final NumberFormatException ignored) {
+					}
+
+			final Point legacySpawn = Point.load(section.getConfigurationSection("spawn"));
+
+			if (legacySpawn != null)
+				arena.getSpawns().putIfAbsent(1, legacySpawn);
+
 			arena.setStartLine(Region.load(section.getConfigurationSection("start-line"), LEGACY_RADIUS));
 			arena.setFinishLine(Region.load(section.getConfigurationSection("finish"), LEGACY_RADIUS));
 
 			arena.getCheckpoints().addAll(loadList(section.getConfigurationSection("checkpoints")));
 			arena.getLights().addAll(loadList(section.getConfigurationSection("lights")));
+			arena.setStartSignal(Region.load(section.getConfigurationSection("start-signal"), 0));
+
+			for (final String raw : section.getStringList("track-blocks")) {
+				final Material material = Material.matchMaterial(raw);
+
+				if (material != null && material.isBlock())
+					arena.getTrackBlocks().add(material);
+				else
+					this.plugin.getLogger().warning("Arena " + name + ": unknown track block '" + raw + "' ignored.");
+			}
 
 			arena.setRewardMode(Arena.RewardMode.parse(section.getString("reward.mode", "NONE")));
 			arena.getRewardCommands().addAll(section.getStringList("reward.commands"));
@@ -142,8 +171,8 @@ public final class ArenaManager {
 			// Creates the section even for brand-new, empty arenas
 			yaml.createSection(base);
 
-			if (arena.getSpawn() != null)
-				arena.getSpawn().save(yaml.createSection(base + ".spawn"));
+			for (final Map.Entry<Integer, Point> spawn : arena.getSpawns().entrySet())
+				spawn.getValue().save(yaml.createSection(base + ".spawns." + spawn.getKey()));
 
 			if (arena.getStartLine() != null)
 				arena.getStartLine().save(yaml.createSection(base + ".start-line"));
@@ -160,6 +189,16 @@ public final class ArenaManager {
 
 			for (final Region lamp : arena.getLights())
 				lamp.save(yaml.createSection(base + ".lights." + index++));
+
+			if (arena.getStartSignal() != null)
+				arena.getStartSignal().save(yaml.createSection(base + ".start-signal"));
+
+			final List<String> trackBlocks = new ArrayList<>();
+
+			for (final Material material : arena.getTrackBlocks())
+				trackBlocks.add(material.name());
+
+			yaml.set(base + ".track-blocks", trackBlocks);
 
 			yaml.set(base + ".reward.mode", arena.getRewardMode().name());
 			yaml.set(base + ".reward.commands", new ArrayList<>(arena.getRewardCommands()));

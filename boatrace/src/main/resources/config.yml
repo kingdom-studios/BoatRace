@@ -27,6 +27,57 @@ start-lights:
   lamp-on-block: RED_CONCRETE
   lamp-off-block: BLACK_CONCRETE   # lamps turn to this at lights out and STAY like that (client-side only)
 
+# Start signal: blocks (selected with /bre startsignal <arena> set) that turn into "go-block" at lights out
+# and, after duration-seconds, into "off-block" again - this frees / resets the start line.
+start-signal:
+  enabled: true
+  # CLIENT = only the racers see the change (world untouched); WORLD = the real blocks change (e.g. a BARRIER gate)
+  mode: CLIENT
+  go-block: LIME_CONCRETE
+  # "" = the real block of the world. With mode WORLD and e.g. BARRIER here + go-block AIR you get a gate that
+  # opens at lights out and closes again after duration-seconds.
+  off-block: ""
+  duration-seconds: 5.0
+
+# Off-track detection: while racing (after the start line), the block under the boat must be a track block.
+# Track blocks are set per arena (/bre trackblocks <arena> ...); arenas without own blocks use default-track-blocks.
+# An empty list on both = detection disabled for that arena.
+off-track:
+  enabled: true
+  check-interval-ticks: 2   # how often the block under the boat is checked
+  grace-ticks: 10           # how long the boat may be off track before the action is applied
+  # PENALTY       = add penalty-seconds to the time
+  # TELEPORT_BACK = put the boat back on the last on-track position + penalty-seconds
+  # RESET         = restart the run (in events: same as TELEPORT_BACK, an event cannot be restarted)
+  action: PENALTY
+  penalty-seconds: 3.0
+  scan-depth: 3             # blocks scanned downwards for the first solid block (air = airborne, ignored)
+  # Used by arenas that have no own track blocks. Empty by default so existing tracks are not penalized
+  # until you configure them. Example: [ICE, PACKED_ICE, BLUE_ICE]
+  default-track-blocks: []
+
+# Grid positions per arena: /bre setspawn <arena> <1..max-positions>. Solo races always start on position #1.
+grid:
+  max-positions: 10
+
+# Event mode: /bre event <arena> open -> joining players get grid positions 1, 2, 3 ...
+# The lights start with /bre start <arena>, or automatically once every position is taken.
+event:
+  auto-start-when-full: true
+  start-delay-ticks: 60     # pause before the lights when the lobby filled up / /bre start was used
+
+# Fallback maps: an arena is used by one solo racer (or one event) at a time. When it is busy, the player is
+# sent to an identical copy of the track in another world (same coordinates).
+fallback:
+  enabled: true
+  # when the arena and all its copies are busy: send the player to another random free arena
+  random-free-arena: true
+  maps:
+    # arena name: [worlds that contain a copy of it]
+    example_arena:
+      - example_arena_copy_1
+      - example_arena_copy_2
+
 # Hotbar buttons given to racers (the player's real inventory is saved and restored).
 hotbar:
   enabled: true

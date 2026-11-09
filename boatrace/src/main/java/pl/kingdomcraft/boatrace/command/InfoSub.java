@@ -6,7 +6,6 @@ import java.util.List;
 import org.mineacademy.fo.command.SimpleCommandGroup;
 
 import pl.kingdomcraft.boatrace.arena.Arena;
-import pl.kingdomcraft.boatrace.arena.Point;
 import pl.kingdomcraft.boatrace.arena.Region;
 import pl.kingdomcraft.boatrace.util.Msg;
 
@@ -19,16 +18,19 @@ final class InfoSub extends RaceSubCommand {
 	@Override
 	protected void onCommand() {
 		final Arena arena = this.requireArena(0);
-		final Point spawn = arena.getSpawn();
 
 		this.info("arena.info",
 				"arena", arena.getName(),
 				"status", arena.isReady() ? Msg.text("arena.info-ready") : Msg.text("arena.info-not-ready", "missing", arena.missing()),
-				"spawn", spawn == null ? "-" : "(" + (int) Math.floor(spawn.x()) + ", " + (int) Math.floor(spawn.y()) + ", " + (int) Math.floor(spawn.z()) + ")",
+				"spawn", DelSpawnSub.spawnList(arena),
 				"start", describe(arena.getStartLine()),
 				"finish", arena.getFinishLineRaw() == null ? Msg.text("arena.info-same-as-start") : describe(arena.getFinishLineRaw()),
 				"checkpoints", arena.getCheckpoints().size(),
 				"lamps", arena.getLights().size(),
+				"signal", describe(arena.getStartSignal()),
+				"track_blocks", TrackBlocksSub.describe(arena, this.plugin().getSettings().defaultTrackBlocks),
+				"fallback", this.plugin().getSettings().fallbackWorldsOf(arena.getName()).isEmpty() ? "-"
+						: String.join(", ", this.plugin().getSettings().fallbackWorldsOf(arena.getName())),
 				"reward_mode", arena.getRewardMode().name(),
 				"reward_count", arena.getRewardCommands().size());
 

@@ -32,12 +32,17 @@ Admin (`boatrace.admin`):
 | `wand` | Gives the selection wand (golden axe). Left click a block = pos1, right click = pos2. |
 | `pos1` / `pos2` | Sets a corner to the block you stand in (handy on water / in the air). |
 | `create <arena>` | Creates an arena. |
-| `setspawn <arena>` | Boat spawn (your position + facing). Must be a few blocks **before** the start line. |
+| `setspawn <arena> [index]` | Grid position #index (1 - `grid.max-positions`, default 1) = your position + facing. Must be a few blocks **before** the start line. Solo races always start on #1. |
+| `delspawn <arena> <index\|list>` | Removes / lists grid positions. |
 | `setstart <arena>` | Start line = current selection (also the finish line unless `setfinish` is used). |
 | `setfinish <arena> [clear]` | Separate finish line = current selection; `clear` = use the start line again. |
 | `addcheckpoint <arena>` | Adds the selection as the next invisible checkpoint zone (order matters). |
 | `delcheckpoint <arena> <number\|all>` | Removes checkpoints. |
 | `lights <arena> add\|set\|clear` | F1 lamps. `add` = selection (or looked-at block) becomes the next lamp; `set` = splits the selection into `start-lights.lamps` lamps, lamp #1 at pos1. |
+| `startsignal <arena> set\|clear` | Blocks (selection) that turn into `start-signal.go-block` at lights out and back after `duration-seconds`. |
+| `trackblocks <arena> add\|remove [material]`, `trackblocks <arena> list\|clear` | Blocks the boat must stay on (no material = the block you look at). |
+| `event <arena> open\|start\|close\|status` | Event mode (multiplayer start). |
+| `start <arena>` | Starts the lights of the event lobby. |
 | `reward <arena> <once\|always\|none> [command]` | Finish reward (see below). Also `reward <arena> clear\|info`. |
 | `info <arena>` | Shows the arena setup. |
 | `admin time add\|remove <player> <time> [arena]`, `admin time reset <player> [arena]`, `admin blacklist <player>` | Time / ban management. |
@@ -55,6 +60,22 @@ An arena is ready once it has a spawn, a start line and at least one checkpoint.
 * Jumpstart (moving or driving through the start line before lights out): dynamic penalty between `jumpstart-penalty.min-seconds` (4.5s, all lamps lit) and `max-seconds` (12.5s, no lamp lit yet), linear by the number of lit lamps. RESET (or leaving the boat) starts a completely fresh attempt without the penalty.
 * The action bar is refreshed every tick and shows only the time and the delta to your personal best: `Time: 01:23.456 (+1.23s)`. The delta appears after the first checkpoint and stays until the next one replaces it. Checkpoints themselves show nothing.
 * The only chat message a racer receives is the final result. After the finish the result stays on screen for `finish-teleport-delay-ticks` (default 60 = 3 s), then the boat is removed and the player is sent to the hub.
+
+### Events (multiplayer start)
+
+1. `/bre event <arena> open` - opens a lobby on a free instance of the arena.
+2. Players join with `/bre join <arena>` (or are sent with `/bre join <arena> <player>`) and take grid positions #1, #2, #3 ... in join order.
+3. `/bre start <arena>` starts the F1 lights for everybody at once - or automatically when every grid position is taken (`event.auto-start-when-full`).
+4. In an event RESET / leaving the boat puts the boat back (grid / last on-track position) without restarting the clock. Results include the finishing position (`{event_note}`).
+
+### Arena instances and fallback maps
+
+An arena instance (arena + world) is used by one solo racer or one event at a time. When it is busy, the player is sent to an identical copy of the track in another world (same coordinates), configured in `config.yml` under `fallback.maps.<arena>`. If all copies are busy and `fallback.random-free-arena` is on, another random free arena is used. Records and rewards are shared between copies (same arena name).
+
+### Start signal and off-track detection
+
+* At lights out the start signal blocks change to `start-signal.go-block`, and after `duration-seconds` (default 5) to `off-block` (empty = the real block). `mode: CLIENT` only shows it to the racers; `mode: WORLD` changes the real blocks (always restored on reset / shutdown).
+* After the start line, the block under the boat is checked every `off-track.check-interval-ticks`. Arenas use their own `trackblocks`, or `off-track.default-track-blocks` (empty = disabled). After `grace-ticks` off the track the `action` is applied: `PENALTY` (+`penalty-seconds`), `TELEPORT_BACK` (last on-track position + penalty) or `RESET` (restart; in events same as TELEPORT_BACK). Warning texts: `title.off-track*` / `race.off-track*` in messages.yml.
 
 ### Rewards
 

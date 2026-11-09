@@ -31,6 +31,11 @@ public record Region(String world, int minX, int minY, int minZ, int maxX, int m
 		return of(block, block);
 	}
 
+	/** The same cuboid in another world (fallback copies of a track). */
+	public Region withWorld(final String otherWorld) {
+		return new Region(otherWorld, this.minX, this.minY, this.minZ, this.maxX, this.maxY, this.maxZ);
+	}
+
 	public int sizeX() {
 		return this.maxX - this.minX + 1;
 	}

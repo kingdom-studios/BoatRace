@@ -12,6 +12,11 @@ public record Point(String world, double x, double y, double z, float yaw, float
 		return new Point(loc.getWorld().getName(), loc.getX(), loc.getY(), loc.getZ(), loc.getYaw(), loc.getPitch());
 	}
 
+	/** The same coordinates in another world (fallback copies of a track). */
+	public Point withWorld(final String otherWorld) {
+		return new Point(otherWorld, this.x, this.y, this.z, this.yaw, this.pitch);
+	}
+
 	/** @return the location or null when the world is not loaded */
 	public Location toLocation() {
 		final World bukkitWorld = Bukkit.getWorld(this.world);

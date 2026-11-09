@@ -1,8 +1,14 @@
 package pl.kingdomcraft.boatrace.arena;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+
+import org.bukkit.Material;
 
 /** A race track definition. Plain data, edited by admin commands. */
 public final class Arena {
@@ -31,13 +37,18 @@ public final class Arena {
 
 	private final String name;
 
-	private Point spawn;
+	/** Grid positions: index (1, 2, 3 ...) -> spawn. Solo races use the lowest index (normally #1). */
+	private final TreeMap<Integer, Point> spawns = new TreeMap<>();
 	private Region startLine;
 	/** null = the start line is also the finish line (circuit) */
 	private Region finishLine;
 	private final List<Region> checkpoints = new ArrayList<>();
 	/** F1 lamps in lighting order; every lamp may consist of several blocks */
 	private final List<Region> lights = new ArrayList<>();
+	/** blocks that change to the "go" block at lights out (optional) */
+	private Region startSignal;
+	/** blocks the boat must stay on; empty = the default list from config.yml */
+	private final Set<Material> trackBlocks = EnumSet.noneOf(Material.class);
 
 	private RewardMode rewardMode = RewardMode.NONE;
 	private final List<String> rewardCommands = new ArrayList<>();
@@ -50,13 +61,33 @@ public final class Arena {
 		return this.name;
 	}
 
-	public Point getSpawn() {
-		return this.spawn;
+	// ------------------------------------------------------------------------------------------
+	// Spawns (grid)
+	// ------------------------------------------------------------------------------------------
+
+	public TreeMap<Integer, Point> getSpawns() {
+		return this.spawns;
 	}
 
-	public void setSpawn(final Point spawn) {
-		this.spawn = spawn;
+	/** The solo spawn: #1, or the lowest defined position when #1 was removed. */
+	public Point getPrimarySpawn() {
+		return this.spawns.isEmpty() ? null : this.spawns.firstEntry().getValue();
 	}
+
+	public int getPrimarySpawnIndex() {
+		return this.spawns.isEmpty() ? 1 : this.spawns.firstKey();
+	}
+
+	/** The world the arena was built in (world of the primary spawn). */
+	public String getWorldName() {
+		final Point spawn = this.getPrimarySpawn();
+
+		return spawn == null ? null : spawn.world();
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Zones
+	// ------------------------------------------------------------------------------------------
 
 	public Region getStartLine() {
 		return this.startLine;
@@ -88,6 +119,22 @@ public final class Arena {
 		return this.lights;
 	}
 
+	public Region getStartSignal() {
+		return this.startSignal;
+	}
+
+	public void setStartSignal(final Region startSignal) {
+		this.startSignal = startSignal;
+	}
+
+	public Set<Material> getTrackBlocks() {
+		return this.trackBlocks;
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Rewards
+	// ------------------------------------------------------------------------------------------
+
 	public RewardMode getRewardMode() {
 		return this.rewardMode;
 	}
@@ -100,19 +147,23 @@ public final class Arena {
 		return this.rewardCommands;
 	}
 
+	// ------------------------------------------------------------------------------------------
+	// State
+	// ------------------------------------------------------------------------------------------
+
 	/**
 	 * An arena is playable once it has a spawn, a start line and at least one checkpoint.
 	 * The checkpoint is mandatory: without one, crossing a shared start/finish line could complete a lap instantly.
 	 */
 	public boolean isReady() {
-		return this.spawn != null && this.startLine != null && !this.checkpoints.isEmpty();
+		return !this.spawns.isEmpty() && this.startLine != null && !this.checkpoints.isEmpty();
 	}
 
 	/** Human readable list of what is still missing, empty when ready. */
 	public String missing() {
 		final List<String> missing = new ArrayList<>();
 
-		if (this.spawn == null)
+		if (this.spawns.isEmpty())
 			missing.add("spawn");
 
 		if (this.startLine == null)
@@ -122,5 +173,32 @@ public final class Arena {
 			missing.add("checkpoint");
 
 		return String.join(", ", missing);
+	}
+
+	/**
+	 * A copy of this arena with every position moved into {@code world} (same coordinates). Used for fallback maps:
+	 * identical copies of a track in other worlds. Records / rewards stay shared because the name is the same.
+	 */
+	public Arena inWorld(final String world) {
+		final Arena copy = new Arena(this.name);
+
+		for (final Map.Entry<Integer, Point> entry : this.spawns.entrySet())
+			copy.spawns.put(entry.getKey(), entry.getValue().withWorld(world));
+
+		copy.startLine = this.startLine == null ? null : this.startLine.withWorld(world);
+		copy.finishLine = this.finishLine == null ? null : this.finishLine.withWorld(world);
+		copy.startSignal = this.startSignal == null ? null : this.startSignal.withWorld(world);
+
+		for (final Region checkpoint : this.checkpoints)
+			copy.checkpoints.add(checkpoint.withWorld(world));
+
+		for (final Region lamp : this.lights)
+			copy.lights.add(lamp.withWorld(world));
+
+		copy.trackBlocks.addAll(this.trackBlocks);
+		copy.rewardMode = this.rewardMode;
+		copy.rewardCommands.addAll(this.rewardCommands);
+
+		return copy;
 	}
 }
