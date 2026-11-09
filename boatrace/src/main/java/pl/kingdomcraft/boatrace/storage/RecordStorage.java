@@ -20,15 +20,30 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 
+import org.bukkit.Bukkit;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 
 /**
- * Flat-file SQLite storage (plugins/BoatRace/database.db).
+ * Shared MariaDB storage (the same database the proxy uses), pooled with HikariCP.
  *
- * Everything is cached in memory so lookups (PlaceholderAPI, rankings, checkpoint deltas) never touch the disk.
- * All writes are queued onto a single IO thread, so the server thread never waits for SQLite.
+ * Tables (prefix "boatrace_"):
+ *  - records    best time per (arena, player) incl. splits and the server it was driven on (server_name)
+ *  - runs       every finished race (history for the web panel), with server_name / server_group
+ *  - blacklist  banned players (network wide)
+ *  - rewards    one-time rewards already claimed
+ *
+ * Everything is cached in memory so lookups (PlaceholderAPI, rankings, checkpoint deltas) never touch the database.
+ * All writes are queued onto a single IO thread (keeps their order), and the cache is reloaded every
+ * records.refresh-seconds so times driven on other servers of the network show up too.
+ * Writes are race-safe across servers: a best time is only ever replaced by a FASTER one (decided by the database).
  */
 public final class RecordStorage {
 
@@ -36,23 +51,29 @@ public final class RecordStorage {
 		void run(Connection connection) throws SQLException;
 	}
 
+	private static final String RECORDS = "boatrace_records";
+	private static final String RUNS = "boatrace_runs";
+	private static final String BLACKLIST = "boatrace_blacklist";
+	private static final String REWARDS = "boatrace_rewards";
+
 	private final JavaPlugin plugin;
-	private final File dbFile;
 	private final ExecutorService io = Executors.newSingleThreadExecutor(runnable -> new Thread(runnable, "BoatRace-IO"));
 
-	/** Only touched by open() (before any async task is queued) and then exclusively by the IO thread. */
-	private Connection connection;
+	private HikariDataSource dataSource;
+	private BukkitTask refreshTask;
+
+	private String serverName = "";
+	private String serverGroup = "";
 
 	// arenaKey -> (player -> record). Guarded by "this".
-	private final Map<String, Map<UUID, RaceRecord>> records = new HashMap<>();
+	private Map<String, Map<UUID, RaceRecord>> records = new HashMap<>();
 	private final Map<String, List<RaceRecord>> rankingCache = new HashMap<>();
-	private final Set<UUID> blacklist = new HashSet<>();
+	private Set<UUID> blacklist = new HashSet<>();
 	/** "arenaKey|uuid" of players who already received the one-time reward of an arena. Guarded by "this". */
-	private final Set<String> claimedRewards = new HashSet<>();
+	private Set<String> claimedRewards = new HashSet<>();
 
 	public RecordStorage(final JavaPlugin plugin) {
 		this.plugin = plugin;
-		this.dbFile = new File(plugin.getDataFolder(), "database.db");
 	}
 
 	private static String key(final String arena) {
@@ -63,56 +84,95 @@ public final class RecordStorage {
 	// Lifecycle
 	// ------------------------------------------------------------------------------------------
 
-	public synchronized void open() throws SQLException, ClassNotFoundException {
-		// The SQLite JDBC driver is shipped with Paper (server libraries).
-		Class.forName("org.sqlite.JDBC");
+	/**
+	 * Connects to MariaDB (config sections Server + Database), creates / upgrades the tables, imports an old
+	 * SQLite database.db once and fills the cache. Blocking - called once on startup.
+	 */
+	public void open(final ConfigurationSection config, final String serverName, final String serverGroup, final int refreshSeconds) throws SQLException {
+		this.serverName = serverName == null ? "" : serverName;
+		this.serverGroup = serverGroup == null ? "" : serverGroup;
 
-		this.plugin.getDataFolder().mkdirs();
-		this.connection = DriverManager.getConnection("jdbc:sqlite:" + this.dbFile.getAbsolutePath());
+		this.dataSource = new HikariDataSource(this.hikariConfig(config));
 
-		try (Statement st = this.connection.createStatement()) {
-			st.execute("CREATE TABLE IF NOT EXISTS records ("
-					+ "arena TEXT NOT NULL, uuid TEXT NOT NULL, name TEXT NOT NULL, best_ms INTEGER NOT NULL, "
-					+ "splits TEXT NOT NULL DEFAULT '', updated INTEGER NOT NULL, PRIMARY KEY (arena, uuid))");
-			st.execute("CREATE TABLE IF NOT EXISTS blacklist (uuid TEXT PRIMARY KEY, name TEXT NOT NULL)");
-			st.execute("CREATE TABLE IF NOT EXISTS rewards (arena TEXT NOT NULL, uuid TEXT NOT NULL, claimed INTEGER NOT NULL, PRIMARY KEY (arena, uuid))");
+		try (Connection connection = this.dataSource.getConnection(); Statement st = connection.createStatement()) {
+			st.execute("CREATE TABLE IF NOT EXISTS " + RECORDS + " ("
+					+ "arena VARCHAR(64) NOT NULL, uuid CHAR(36) NOT NULL, name VARCHAR(32) NOT NULL, best_ms BIGINT NOT NULL, "
+					+ "splits TEXT NOT NULL, server_name VARCHAR(64) NOT NULL DEFAULT '', updated BIGINT NOT NULL, "
+					+ "PRIMARY KEY (arena, uuid), KEY idx_arena_best (arena, best_ms)"
+					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+			// tables created by an early version without the column
+			st.execute("ALTER TABLE " + RECORDS + " ADD COLUMN IF NOT EXISTS server_name VARCHAR(64) NOT NULL DEFAULT '' AFTER splits");
+
+			st.execute("CREATE TABLE IF NOT EXISTS " + RUNS + " ("
+					+ "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, arena VARCHAR(64) NOT NULL, uuid CHAR(36) NOT NULL, "
+					+ "name VARCHAR(32) NOT NULL, time_ms BIGINT NOT NULL, penalty_ms BIGINT NOT NULL DEFAULT 0, splits TEXT NOT NULL, "
+					+ "personal_best TINYINT(1) NOT NULL DEFAULT 0, server_name VARCHAR(64) NOT NULL DEFAULT '', "
+					+ "server_group VARCHAR(64) NOT NULL DEFAULT '', finished_at BIGINT NOT NULL, "
+					+ "KEY idx_runs_arena_time (arena, time_ms), KEY idx_runs_uuid (uuid), KEY idx_runs_server (server_name)"
+					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+			st.execute("CREATE TABLE IF NOT EXISTS " + BLACKLIST + " ("
+					+ "uuid CHAR(36) NOT NULL PRIMARY KEY, name VARCHAR(32) NOT NULL, server_name VARCHAR(64) NOT NULL DEFAULT '', created BIGINT NOT NULL"
+					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+			st.execute("CREATE TABLE IF NOT EXISTS " + REWARDS + " ("
+					+ "arena VARCHAR(64) NOT NULL, uuid CHAR(36) NOT NULL, server_name VARCHAR(64) NOT NULL DEFAULT '', claimed BIGINT NOT NULL, "
+					+ "PRIMARY KEY (arena, uuid)"
+					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+			this.importLegacySqlite(connection);
+			this.loadCache(connection);
 		}
 
-		this.records.clear();
-		this.blacklist.clear();
-		this.rankingCache.clear();
-		this.claimedRewards.clear();
+		// periodic refresh: picks up times / bans / rewards from the other servers of the network
+		final long period = Math.max(5, refreshSeconds) * 20L;
 
-		try (Statement st = this.connection.createStatement(); ResultSet rs = st.executeQuery("SELECT arena, uuid, name, best_ms, splits FROM records")) {
-			while (rs.next())
-				try {
-					final String arena = rs.getString("arena");
-					final UUID uuid = UUID.fromString(rs.getString("uuid"));
-					final RaceRecord record = new RaceRecord(uuid, rs.getString("name"), rs.getLong("best_ms"), parseSplits(rs.getString("splits")));
-
-					this.records.computeIfAbsent(arena, k -> new HashMap<>()).put(uuid, record);
-
-				} catch (final IllegalArgumentException ex) {
-					this.plugin.getLogger().warning("Skipping corrupted record row: " + ex.getMessage());
-				}
-		}
-
-		try (Statement st = this.connection.createStatement(); ResultSet rs = st.executeQuery("SELECT uuid FROM blacklist")) {
-			while (rs.next())
-				try {
-					this.blacklist.add(UUID.fromString(rs.getString("uuid")));
-				} catch (final IllegalArgumentException ignored) {
-				}
-		}
-
-		try (Statement st = this.connection.createStatement(); ResultSet rs = st.executeQuery("SELECT arena, uuid FROM rewards")) {
-			while (rs.next())
-				this.claimedRewards.add(rs.getString("arena") + "|" + rs.getString("uuid"));
-		}
+		this.refreshTask = Bukkit.getScheduler().runTaskTimerAsynchronously(this.plugin, () -> this.async(this::loadCache), period, period);
 	}
 
-	/** Flushes queued writes and closes the database. Call from onDisable. */
+	private HikariConfig hikariConfig(final ConfigurationSection c) {
+		final String host = c.getString("Database.Host", "localhost");
+		final int port = c.getInt("Database.Port", 3306);
+		final String database = c.getString("Database.Name", "minecraft");
+
+		final int poolSize = Math.max(1, c.getInt("Database.Pool_Size", 6));
+		final long timeout = Math.max(250L, c.getLong("Database.Connection_Timeout_Millis", 10_000L));
+		long maxLifetime = c.getLong("Database.Max_Lifetime_Millis", 600_000L);
+		long keepalive = c.getLong("Database.Keepalive_Millis", 60_000L);
+
+		// Same rules HikariCP enforces, but with a clear message instead of silently changed values
+		if (maxLifetime != 0L && maxLifetime < 30_000L) {
+			this.plugin.getLogger().warning("Database.Max_Lifetime_Millis must be 0 or at least 30000 - using 600000.");
+			maxLifetime = 600_000L;
+		}
+
+		if (keepalive != 0L && (keepalive < 30_000L || (maxLifetime != 0L && keepalive >= maxLifetime))) {
+			this.plugin.getLogger().warning("Database.Keepalive_Millis must be 0 or 30000+ and below Max_Lifetime_Millis - keepalive disabled.");
+			keepalive = 0L;
+		}
+
+		final HikariConfig config = new HikariConfig();
+
+		config.setPoolName("BoatRace-MariaDB");
+		config.setDriverClassName(org.mariadb.jdbc.Driver.class.getName());
+		config.setJdbcUrl("jdbc:mariadb://" + host + ":" + port + "/" + database);
+		config.setUsername(c.getString("Database.User", "root"));
+		config.setPassword(c.getString("Database.Password", ""));
+		config.setMaximumPoolSize(poolSize);
+		config.setMinimumIdle(Math.min(2, poolSize));
+		config.setConnectionTimeout(timeout);
+		config.setMaxLifetime(maxLifetime);
+		config.setKeepaliveTime(keepalive);
+		config.setIdleTimeout(maxLifetime == 0L ? 600_000L : Math.min(600_000L, Math.max(10_000L, maxLifetime - 1_000L)));
+
+		return config;
+	}
+
+	/** Flushes queued writes and closes the pool. Call from onDisable. */
 	public void close() {
+		if (this.refreshTask != null)
+			this.refreshTask.cancel();
+
 		this.io.shutdown();
 
 		try {
@@ -123,27 +183,161 @@ public final class RecordStorage {
 			Thread.currentThread().interrupt();
 		}
 
-		try {
-			if (this.connection != null)
-				this.connection.close();
-
-		} catch (final SQLException ex) {
-			this.plugin.getLogger().log(Level.WARNING, "Could not close the database", ex);
-		}
+		if (this.dataSource != null)
+			this.dataSource.close();
 	}
 
 	private void async(final SqlTask task) {
-		if (this.io.isShutdown())
+		if (this.io.isShutdown() || this.dataSource == null)
 			return;
 
-		this.io.execute(() -> {
-			try {
-				task.run(this.connection);
+		try {
+			this.io.execute(() -> {
+				try (Connection connection = this.dataSource.getConnection()) {
+					task.run(connection);
+
+				} catch (final SQLException ex) {
+					this.plugin.getLogger().log(Level.SEVERE, "BoatRace database error", ex);
+				}
+			});
+
+		} catch (final java.util.concurrent.RejectedExecutionException ignored) {
+			// shutting down
+		}
+	}
+
+	/** Reloads every table into fresh maps and swaps them in at once. */
+	private void loadCache(final Connection connection) throws SQLException {
+		final Map<String, Map<UUID, RaceRecord>> newRecords = new HashMap<>();
+		final Set<UUID> newBlacklist = new HashSet<>();
+		final Set<String> newRewards = new HashSet<>();
+
+		try (Statement st = connection.createStatement();
+				ResultSet rs = st.executeQuery("SELECT arena, uuid, name, best_ms, splits, server_name FROM " + RECORDS)) {
+			while (rs.next())
+				try {
+					final UUID uuid = UUID.fromString(rs.getString("uuid"));
+					final RaceRecord record = new RaceRecord(uuid, rs.getString("name"), rs.getLong("best_ms"),
+							parseSplits(rs.getString("splits")), rs.getString("server_name"));
+
+					newRecords.computeIfAbsent(key(rs.getString("arena")), k -> new HashMap<>()).put(uuid, record);
+
+				} catch (final IllegalArgumentException ex) {
+					this.plugin.getLogger().warning("Skipping corrupted record row: " + ex.getMessage());
+				}
+		}
+
+		try (Statement st = connection.createStatement(); ResultSet rs = st.executeQuery("SELECT uuid FROM " + BLACKLIST)) {
+			while (rs.next())
+				try {
+					newBlacklist.add(UUID.fromString(rs.getString("uuid")));
+				} catch (final IllegalArgumentException ignored) {
+				}
+		}
+
+		try (Statement st = connection.createStatement(); ResultSet rs = st.executeQuery("SELECT arena, uuid FROM " + REWARDS)) {
+			while (rs.next())
+				newRewards.add(key(rs.getString("arena")) + "|" + rs.getString("uuid"));
+		}
+
+		synchronized (this) {
+			this.records = newRecords;
+			this.blacklist = newBlacklist;
+			this.claimedRewards = newRewards;
+			this.rankingCache.clear();
+		}
+	}
+
+	/**
+	 * One-time import of the SQLite database.db used by older versions. Existing (faster) MariaDB times win.
+	 * The file is renamed to database.db.migrated afterwards.
+	 */
+	private void importLegacySqlite(final Connection maria) {
+		final File file = new File(this.plugin.getDataFolder(), "database.db");
+
+		if (!file.exists())
+			return;
+
+		try {
+			Class.forName("org.sqlite.JDBC");
+
+		} catch (final ClassNotFoundException ex) {
+			this.plugin.getLogger().warning("Found an old database.db, but the SQLite driver is missing - it was not imported.");
+			return;
+		}
+
+		int imported = 0;
+
+		try (Connection sqlite = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath()); Statement st = sqlite.createStatement()) {
+			try (ResultSet rs = st.executeQuery("SELECT arena, uuid, name, best_ms, splits, updated FROM records");
+					PreparedStatement ps = maria.prepareStatement(upsertBestSql())) {
+				while (rs.next()) {
+					ps.setString(1, key(rs.getString("arena")));
+					ps.setString(2, rs.getString("uuid"));
+					ps.setString(3, rs.getString("name"));
+					ps.setLong(4, rs.getLong("best_ms"));
+					ps.setString(5, rs.getString("splits") == null ? "" : rs.getString("splits"));
+					ps.setString(6, this.serverName);
+					ps.setLong(7, rs.getLong("updated"));
+					ps.addBatch();
+					imported++;
+				}
+
+				ps.executeBatch();
+			}
+
+			try (ResultSet rs = st.executeQuery("SELECT uuid, name FROM blacklist");
+					PreparedStatement ps = maria.prepareStatement("INSERT IGNORE INTO " + BLACKLIST + " (uuid, name, server_name, created) VALUES (?, ?, ?, ?)")) {
+				while (rs.next()) {
+					ps.setString(1, rs.getString("uuid"));
+					ps.setString(2, rs.getString("name"));
+					ps.setString(3, this.serverName);
+					ps.setLong(4, System.currentTimeMillis());
+					ps.addBatch();
+				}
+
+				ps.executeBatch();
+			}
+
+			try (ResultSet rs = st.executeQuery("SELECT arena, uuid, claimed FROM rewards");
+					PreparedStatement ps = maria.prepareStatement("INSERT IGNORE INTO " + REWARDS + " (arena, uuid, server_name, claimed) VALUES (?, ?, ?, ?)")) {
+				while (rs.next()) {
+					ps.setString(1, key(rs.getString("arena")));
+					ps.setString(2, rs.getString("uuid"));
+					ps.setString(3, this.serverName);
+					ps.setLong(4, rs.getLong("claimed"));
+					ps.addBatch();
+				}
+
+				ps.executeBatch();
 
 			} catch (final SQLException ex) {
-				this.plugin.getLogger().log(Level.SEVERE, "BoatRace database error", ex);
+				// very old database.db files have no rewards table
 			}
-		});
+
+		} catch (final SQLException ex) {
+			this.plugin.getLogger().log(Level.WARNING, "Could not import the old database.db into MariaDB - it was left untouched.", ex);
+			return;
+		}
+
+		final File done = new File(this.plugin.getDataFolder(), "database.db.migrated");
+
+		if (!file.renameTo(done))
+			this.plugin.getLogger().warning("Imported database.db but could not rename it - delete it to avoid a second import.");
+
+		this.plugin.getLogger().info("Imported " + imported + " records from the old SQLite database.db into MariaDB.");
+	}
+
+	/** Insert, or replace the stored best ONLY when the new time is faster (decided in the database). */
+	private static String upsertBestSql() {
+		// MariaDB evaluates the assignments left to right, so best_ms must be updated last
+		return "INSERT INTO " + RECORDS + " (arena, uuid, name, best_ms, splits, server_name, updated) VALUES (?, ?, ?, ?, ?, ?, ?) "
+				+ "ON DUPLICATE KEY UPDATE "
+				+ "name = VALUES(name), "
+				+ "splits = IF(VALUES(best_ms) < best_ms, VALUES(splits), splits), "
+				+ "server_name = IF(VALUES(best_ms) < best_ms, VALUES(server_name), server_name), "
+				+ "updated = IF(VALUES(best_ms) < best_ms, VALUES(updated), updated), "
+				+ "best_ms = LEAST(best_ms, VALUES(best_ms))";
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -191,26 +385,62 @@ public final class RecordStorage {
 	}
 
 	/**
-	 * Saves the run if it is faster than the stored best (or there is none).
+	 * Saves the run if it is faster than the stored best (or there is none). Every finished run (banned players
+	 * excluded) is also written to the runs history.
 	 *
 	 * @return true when it became the new personal best
 	 */
-	public synchronized boolean submitIfBetter(final String arena, final UUID uuid, final String name, final long timeMs, final long[] splits) {
+	public synchronized boolean submitRun(final String arena, final UUID uuid, final String name, final long timeMs, final long penaltyMs, final long[] splits) {
 		if (this.blacklist.contains(uuid))
 			return false;
 
+		final String arenaKey = key(arena);
 		final RaceRecord old = this.getRecord(arena, uuid);
+		final boolean newBest = old == null || timeMs < old.getBestMs();
+		final String joinedSplits = joinSplits(splits);
+		final long now = System.currentTimeMillis();
+		final String server = this.serverName;
+		final String group = this.serverGroup;
 
-		if (old != null && old.getBestMs() <= timeMs)
-			return false;
+		if (newBest) {
+			this.records.computeIfAbsent(arenaKey, k -> new HashMap<>()).put(uuid, new RaceRecord(uuid, name, timeMs, splits, server));
+			this.rankingCache.remove(arenaKey);
+		}
 
-		this.put(arena, new RaceRecord(uuid, name, timeMs, splits));
+		this.async(connection -> {
+			try (PreparedStatement ps = connection.prepareStatement(upsertBestSql())) {
+				ps.setString(1, arenaKey);
+				ps.setString(2, uuid.toString());
+				ps.setString(3, name);
+				ps.setLong(4, timeMs);
+				ps.setString(5, joinedSplits);
+				ps.setString(6, server);
+				ps.setLong(7, now);
+				ps.executeUpdate();
+			}
 
-		return true;
+			try (PreparedStatement ps = connection.prepareStatement("INSERT INTO " + RUNS
+					+ " (arena, uuid, name, time_ms, penalty_ms, splits, personal_best, server_name, server_group, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+				ps.setString(1, arenaKey);
+				ps.setString(2, uuid.toString());
+				ps.setString(3, name);
+				ps.setLong(4, timeMs);
+				ps.setLong(5, penaltyMs);
+				ps.setString(6, joinedSplits);
+				ps.setBoolean(7, newBest);
+				ps.setString(8, server);
+				ps.setString(9, group);
+				ps.setLong(10, now);
+				ps.executeUpdate();
+			}
+		});
+
+		return newBest;
 	}
 
 	/**
-	 * Adds (or, with a negative amount, removes) time on the player's best times.
+	 * Adds (or, with a negative amount, removes) time on the player's best times. Relative in the database, so it is
+	 * safe even when another server changed the record meanwhile.
 	 *
 	 * @param arena null = all arenas
 	 * @return how many records changed
@@ -218,7 +448,7 @@ public final class RecordStorage {
 	public synchronized int adjustTime(final UUID uuid, final String arena, final long deltaMs) {
 		int changed = 0;
 
-		for (final Map.Entry<String, Map<UUID, RaceRecord>> entry : new ArrayList<>(this.records.entrySet())) {
+		for (final Map.Entry<String, Map<UUID, RaceRecord>> entry : this.records.entrySet()) {
 			if (arena != null && !entry.getKey().equals(key(arena)))
 				continue;
 
@@ -227,15 +457,31 @@ public final class RecordStorage {
 			if (old == null)
 				continue;
 
-			this.put(entry.getKey(), old.withBestMs(Math.max(1L, old.getBestMs() + deltaMs)));
+			entry.getValue().put(uuid, old.withBestMs(Math.max(1L, old.getBestMs() + deltaMs)));
+			this.rankingCache.remove(entry.getKey());
 			changed++;
 		}
+
+		if (changed > 0)
+			this.async(connection -> {
+				try (PreparedStatement ps = connection.prepareStatement("UPDATE " + RECORDS + " SET best_ms = GREATEST(1, best_ms + ?), updated = ? WHERE uuid = ?"
+						+ (arena == null ? "" : " AND arena = ?"))) {
+					ps.setLong(1, deltaMs);
+					ps.setLong(2, System.currentTimeMillis());
+					ps.setString(3, uuid.toString());
+
+					if (arena != null)
+						ps.setString(4, key(arena));
+
+					ps.executeUpdate();
+				}
+			});
 
 		return changed;
 	}
 
 	/**
-	 * Deletes the player's times.
+	 * Deletes the player's best times (the runs history is kept).
 	 *
 	 * @param arena null = all arenas
 	 * @return how many records were removed
@@ -243,47 +489,29 @@ public final class RecordStorage {
 	public synchronized int resetTimes(final UUID uuid, final String arena) {
 		int removed = 0;
 
-		for (final Map.Entry<String, Map<UUID, RaceRecord>> entry : new ArrayList<>(this.records.entrySet())) {
+		for (final Map.Entry<String, Map<UUID, RaceRecord>> entry : this.records.entrySet()) {
 			if (arena != null && !entry.getKey().equals(key(arena)))
 				continue;
 
 			if (entry.getValue().remove(uuid) != null) {
 				removed++;
 				this.rankingCache.remove(entry.getKey());
-
-				final String arenaKey = entry.getKey();
-
-				this.async(connection -> {
-					try (PreparedStatement ps = connection.prepareStatement("DELETE FROM records WHERE arena = ? AND uuid = ?")) {
-						ps.setString(1, arenaKey);
-						ps.setString(2, uuid.toString());
-						ps.executeUpdate();
-					}
-				});
 			}
 		}
 
+		if (removed > 0)
+			this.async(connection -> {
+				try (PreparedStatement ps = connection.prepareStatement("DELETE FROM " + RECORDS + " WHERE uuid = ?" + (arena == null ? "" : " AND arena = ?"))) {
+					ps.setString(1, uuid.toString());
+
+					if (arena != null)
+						ps.setString(2, key(arena));
+
+					ps.executeUpdate();
+				}
+			});
+
 		return removed;
-	}
-
-	private void put(final String arenaKey, final RaceRecord record) {
-		this.records.computeIfAbsent(arenaKey, k -> new HashMap<>()).put(record.getUuid(), record);
-		this.rankingCache.remove(arenaKey);
-
-		final String splits = joinSplits(record.getSplits());
-		final long now = System.currentTimeMillis();
-
-		this.async(connection -> {
-			try (PreparedStatement ps = connection.prepareStatement("INSERT OR REPLACE INTO records (arena, uuid, name, best_ms, splits, updated) VALUES (?, ?, ?, ?, ?, ?)")) {
-				ps.setString(1, arenaKey);
-				ps.setString(2, record.getUuid().toString());
-				ps.setString(3, record.getName());
-				ps.setLong(4, record.getBestMs());
-				ps.setString(5, splits);
-				ps.setLong(6, now);
-				ps.executeUpdate();
-			}
-		});
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -297,12 +525,13 @@ public final class RecordStorage {
 	/** @return true if the player is blacklisted AFTER the call, false if they were removed from it */
 	public synchronized boolean toggleBlacklist(final UUID uuid, final String name) {
 		final boolean nowBlacklisted;
+		final String server = this.serverName;
 
 		if (this.blacklist.remove(uuid)) {
 			nowBlacklisted = false;
 
 			this.async(connection -> {
-				try (PreparedStatement ps = connection.prepareStatement("DELETE FROM blacklist WHERE uuid = ?")) {
+				try (PreparedStatement ps = connection.prepareStatement("DELETE FROM " + BLACKLIST + " WHERE uuid = ?")) {
 					ps.setString(1, uuid.toString());
 					ps.executeUpdate();
 				}
@@ -313,9 +542,11 @@ public final class RecordStorage {
 			this.blacklist.add(uuid);
 
 			this.async(connection -> {
-				try (PreparedStatement ps = connection.prepareStatement("INSERT OR REPLACE INTO blacklist (uuid, name) VALUES (?, ?)")) {
+				try (PreparedStatement ps = connection.prepareStatement("REPLACE INTO " + BLACKLIST + " (uuid, name, server_name, created) VALUES (?, ?, ?, ?)")) {
 					ps.setString(1, uuid.toString());
 					ps.setString(2, name);
+					ps.setString(3, server);
+					ps.setLong(4, System.currentTimeMillis());
 					ps.executeUpdate();
 				}
 			});
@@ -330,29 +561,43 @@ public final class RecordStorage {
 	// One-time rewards
 	// ------------------------------------------------------------------------------------------
 
+	/** Fast cache check, no database access. */
+	public synchronized boolean hasClaimedReward(final String arena, final UUID uuid) {
+		return this.claimedRewards.contains(key(arena) + "|" + uuid);
+	}
+
 	/**
-	 * Marks the one-time reward of the arena as claimed by the player.
+	 * Claims the one-time reward of the arena. The database decides (INSERT IGNORE), so a player can never get it
+	 * twice - not even when finishing on two servers of the network at the same moment.
 	 *
-	 * @return true if it was NOT claimed before (= the reward should be given now)
+	 * @param onClaimed run on the MAIN thread only when this call actually claimed it
 	 */
-	public synchronized boolean claimOnceReward(final String arena, final UUID uuid) {
+	public void claimOnceReward(final String arena, final UUID uuid, final Runnable onClaimed) {
 		final String arenaKey = key(arena);
 
-		if (!this.claimedRewards.add(arenaKey + "|" + uuid))
-			return false;
+		synchronized (this) {
+			if (!this.claimedRewards.add(arenaKey + "|" + uuid))
+				return;
+		}
 
-		final long now = System.currentTimeMillis();
+		final String server = this.serverName;
 
 		this.async(connection -> {
-			try (PreparedStatement ps = connection.prepareStatement("INSERT OR IGNORE INTO rewards (arena, uuid, claimed) VALUES (?, ?, ?)")) {
+			try (PreparedStatement ps = connection.prepareStatement("INSERT IGNORE INTO " + REWARDS + " (arena, uuid, server_name, claimed) VALUES (?, ?, ?, ?)")) {
 				ps.setString(1, arenaKey);
 				ps.setString(2, uuid.toString());
-				ps.setLong(3, now);
-				ps.executeUpdate();
+				ps.setString(3, server);
+				ps.setLong(4, System.currentTimeMillis());
+
+				if (ps.executeUpdate() > 0)
+					this.mainThread(ignored -> onClaimed.run());
 			}
 		});
+	}
 
-		return true;
+	private void mainThread(final Consumer<Void> action) {
+		if (this.plugin.isEnabled())
+			Bukkit.getScheduler().runTask(this.plugin, () -> action.accept(null));
 	}
 
 	// ------------------------------------------------------------------------------------------

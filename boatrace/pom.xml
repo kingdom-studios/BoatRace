@@ -23,6 +23,25 @@
             <version>6.10.2</version>
         </dependency>
 
+        <!-- MariaDB connection pool + driver - shaded and relocated into the final jar -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>6.3.0</version>
+            <exclusions>
+                <!-- SLF4J is provided by Paper -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.mariadb.jdbc</groupId>
+            <artifactId>mariadb-java-client</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
         <!-- Paper API is provided by the server -->
         <dependency>
             <groupId>io.papermc.paper</groupId>
@@ -67,8 +86,10 @@
                     <createDependencyReducedPom>false</createDependencyReducedPom>
                     <artifactSet>
                         <includes>
-                            <!-- ONLY Foundation goes into the jar (no Lombok, no plugin APIs, no Paper). -->
+                            <!-- ONLY Foundation, HikariCP and the MariaDB driver go into the jar (no Lombok, no plugin APIs, no Paper). -->
                             <include>org.mineacademy:Foundation</include>
+                            <include>com.zaxxer:HikariCP</include>
+                            <include>org.mariadb.jdbc:mariadb-java-client</include>
                         </includes>
                     </artifactSet>
                     <relocations>
@@ -76,7 +97,19 @@
                             <pattern>org.mineacademy.fo</pattern>
                             <shadedPattern>pl.kingdomcraft.boatrace.lib</shadedPattern>
                         </relocation>
+                        <relocation>
+                            <pattern>com.zaxxer.hikari</pattern>
+                            <shadedPattern>pl.kingdomcraft.boatrace.lib.hikari</shadedPattern>
+                        </relocation>
+                        <relocation>
+                            <pattern>org.mariadb.jdbc</pattern>
+                            <shadedPattern>pl.kingdomcraft.boatrace.lib.mariadb</shadedPattern>
+                        </relocation>
                     </relocations>
+                    <transformers>
+                        <!-- keeps META-INF/services (JDBC driver registration) pointing at the relocated classes -->
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                    </transformers>
                     <filters>
                         <filter>
                             <artifact>*:*</artifact>

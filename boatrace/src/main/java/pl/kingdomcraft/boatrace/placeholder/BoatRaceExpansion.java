@@ -18,6 +18,7 @@ import pl.kingdomcraft.boatrace.util.TimeFmt;
  *   %boatrace_besttime_<arena>%              best time of the player asking
  *   %boatrace_top_player_<arena>_<position>% name of the player on that position
  *   %boatrace_top_time_<arena>_<position>%   time on that position
+ *   %boatrace_top_server_<arena>_<position>% server (Server.Name) the time was driven on
  *
  * Arena names may contain underscores. Registered automatically by Foundation (final class,
  * single private constructor + private static final instance).
@@ -54,9 +55,10 @@ public final class BoatRaceExpansion extends SimpleExpansion {
 
 		final boolean topPlayer = lower.startsWith("top_player_");
 		final boolean topTime = lower.startsWith("top_time_");
+		final boolean topServer = lower.startsWith("top_server_");
 
-		if (topPlayer || topTime) {
-			final String rest = identifier.substring(topPlayer ? "top_player_".length() : "top_time_".length());
+		if (topPlayer || topTime || topServer) {
+			final String rest = identifier.substring(topPlayer ? "top_player_".length() : topTime ? "top_time_".length() : "top_server_".length());
 			final int split = rest.lastIndexOf('_');
 
 			if (split <= 0)
@@ -78,6 +80,9 @@ public final class BoatRaceExpansion extends SimpleExpansion {
 				return empty;
 
 			final RaceRecord record = top.get(position - 1);
+
+			if (topServer)
+				return record.getServer().isEmpty() ? empty : record.getServer();
 
 			return topPlayer ? record.getName() : TimeFmt.format(record.getBestMs());
 		}

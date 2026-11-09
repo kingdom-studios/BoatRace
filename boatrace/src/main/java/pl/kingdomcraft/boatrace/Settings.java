@@ -21,6 +21,38 @@ import org.bukkit.configuration.ConfigurationSection;
 /** Typed view over config.yml (read once on load / reload). */
 public final class Settings {
 
+	/** A configured sound: a Bukkit Sound name (ENTITY_PLAYER_LEVELUP) or a sound key (minecraft:entity.player.levelup). */
+	public record SoundSpec(String key, float volume, float pitch) {
+
+		/** Plays the sound to this player only, at their position; {@code pitchOffset} is added to the pitch. */
+		public void play(final org.bukkit.entity.Player player, final float pitchOffset) {
+			if (this.key != null)
+				player.playSound(player.getLocation(), this.key, this.volume, Math.max(0.5F, Math.min(2.0F, this.pitch + pitchOffset)));
+		}
+
+		public void play(final org.bukkit.entity.Player player) {
+			this.play(player, 0.0F);
+		}
+	}
+
+	// --- network identity (written to the database with every result) ---
+	public String serverName = "hub";
+	public String serverGroup = "";
+
+	/** how often (seconds) the record cache is reloaded from the shared database (other servers' times) */
+	public int recordsRefreshSeconds = 30;
+
+	// --- sounds ---
+	public SoundSpec soundCountdown = new SoundSpec("minecraft:block.note_block.pling", 1.0F, 0.6F);
+	/** pitch raised by this much per lit lamp (0 = constant pitch) */
+	public float soundCountdownPitchStep = 0.16F;
+	public SoundSpec soundGo = new SoundSpec("minecraft:entity.player.levelup", 1.0F, 1.5F);
+	public SoundSpec soundCheckpoint = new SoundSpec("minecraft:entity.experience_orb.pickup", 0.8F, 1.4F);
+	public SoundSpec soundFinish = new SoundSpec("minecraft:ui.toast.challenge_complete", 1.0F, 1.0F);
+	public SoundSpec soundOffTrack = new SoundSpec("minecraft:block.note_block.bass", 1.0F, 0.6F);
+	public SoundSpec soundJumpstart = new SoundSpec("minecraft:entity.villager.no", 1.0F, 1.0F);
+	public SoundSpec soundMissedCheckpoint = new SoundSpec("minecraft:entity.villager.no", 1.0F, 0.8F);
+
 	public String hubCommand = "spawn";
 	public EntityType boatType = EntityType.OAK_BOAT;
 
@@ -80,6 +112,19 @@ public final class Settings {
 	public String placeholderEmpty = "-";
 
 	public void load(final FileConfiguration c) {
+		this.serverName = c.getString("Server.Name", "hub");
+		this.serverGroup = c.getString("Server.Group", "");
+		this.recordsRefreshSeconds = Math.max(5, c.getInt("records.refresh-seconds", 30));
+
+		this.soundCountdown = sound(c, "start-countdown", this.soundCountdown);
+		this.soundCountdownPitchStep = (float) c.getDouble("Sounds.start-countdown.pitch-step", 0.16D);
+		this.soundGo = sound(c, "start-go", this.soundGo);
+		this.soundCheckpoint = sound(c, "checkpoint", this.soundCheckpoint);
+		this.soundFinish = sound(c, "finish", this.soundFinish);
+		this.soundOffTrack = sound(c, "off-track", this.soundOffTrack);
+		this.soundJumpstart = sound(c, "jumpstart-penalty", this.soundJumpstart);
+		this.soundMissedCheckpoint = sound(c, "missed-checkpoint", this.soundMissedCheckpoint);
+
 		this.hubCommand = c.getString("hub-command", "spawn");
 
 		final String boat = c.getString("boat-type", "OAK_BOAT").toLowerCase(Locale.ROOT);
@@ -165,6 +210,39 @@ public final class Settings {
 	/** Worlds with copies of the arena (from fallback.maps), never null. */
 	public List<String> fallbackWorldsOf(final String arena) {
 		return this.fallbackWorlds.getOrDefault(arena.toLowerCase(Locale.ROOT), List.of());
+	}
+
+	/**
+	 * Reads Sounds.<name>: sound / volume / pitch. "sound: NONE" (or "") disables it. A name without '.' or ':' is a
+	 * Bukkit Sound constant, anything else a namespaced sound key (resource pack sounds work too).
+	 */
+	private static SoundSpec sound(final FileConfiguration c, final String name, final SoundSpec fallback) {
+		final String base = "Sounds." + name;
+
+		if (!c.isConfigurationSection(base))
+			return fallback;
+
+		final String raw = c.getString(base + ".sound", "").trim();
+		final float volume = (float) c.getDouble(base + ".volume", fallback.volume());
+		final float pitch = (float) c.getDouble(base + ".pitch", fallback.pitch());
+
+		if (raw.isEmpty() || "NONE".equalsIgnoreCase(raw))
+			return new SoundSpec(null, volume, pitch);
+
+		if (raw.indexOf('.') >= 0 || raw.indexOf(':') >= 0)
+			return new SoundSpec(raw.toLowerCase(Locale.ROOT), volume, pitch);
+
+		try {
+			final Object constant = org.bukkit.Sound.class.getField(raw.toUpperCase(Locale.ROOT)).get(null);
+
+			if (constant instanceof final org.bukkit.Sound sound)
+				return new SoundSpec(sound.key().asString(), volume, pitch);
+
+		} catch (final ReflectiveOperationException ignored) {
+		}
+
+		Bukkit.getLogger().warning("[BoatRace] Unknown sound '" + raw + "' in Sounds." + name + " - using the default.");
+		return new SoundSpec(fallback.key(), volume, pitch);
 	}
 
 	private static OffTrackAction parseAction(final String raw) {

@@ -15,7 +15,6 @@ import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
@@ -762,14 +761,12 @@ public final class RaceManager {
 
 		heat.litLamps = lit;
 
-		final float pitch = 0.6F + 0.8F * ((float) lit / (float) heat.lampCount);
-
 		for (final RaceSession racer : heat.racers()) {
 			final Player player = Bukkit.getPlayer(racer.playerId);
 
 			if (player != null) {
 				this.showLamps(player, heat, lit);
-				player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1.0F, pitch);
+				this.settings.soundCountdown.play(player, this.settings.soundCountdownPitchStep * (lit - 1));
 			}
 		}
 	}
@@ -798,7 +795,7 @@ public final class RaceManager {
 			if (player != null) {
 				// All lamps turn black = GO. They stay black (they are only reverted on reset / leave).
 				this.showLamps(player, heat, 0);
-				player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0F, 1.5F);
+				this.settings.soundGo.play(player);
 				Msg.title(player, "go");
 			}
 		}
@@ -993,7 +990,7 @@ public final class RaceManager {
 		s.penaltyMs = penalty;
 
 		Msg.title(player, "jumpstart", "penalty", TimeFmt.delta(penalty));
-		player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.0F, 1.0F);
+		this.settings.soundJumpstart.play(player);
 	}
 
 	private void handleRunningMove(final RaceSession s, final Player player, final Location from, final Location to) {
@@ -1040,7 +1037,7 @@ public final class RaceManager {
 		// Driving back over the line right after the start is harmless; skipping checkpoints is not
 		if (s.nextCheckpoint > 0) {
 			Msg.title(player, "missed-checkpoint", "checkpoint", s.nextCheckpoint + 1, "total", total);
-			player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.0F, 0.8F);
+			this.settings.soundMissedCheckpoint.play(player);
 
 			if (s.heat.event)
 				// an event cannot be restarted - back to the last checkpoint is not tracked, so the lap simply does not count
@@ -1063,7 +1060,7 @@ public final class RaceManager {
 		if (s.referenceSplits != null && index < s.referenceSplits.length && s.referenceSplits[index] > 0L)
 			s.deltaText = deltaText(elapsed - s.referenceSplits[index]);
 
-		player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.8F, 1.4F);
+		this.settings.soundCheckpoint.play(player);
 	}
 
 	private void finish(final RaceSession s, final Player player) {
@@ -1074,7 +1071,7 @@ public final class RaceManager {
 		final String arena = heat.arena.getName();
 		final long previousBest = s.bestTotalMs;
 		final boolean blacklisted = this.storage.isBlacklisted(s.playerId);
-		final boolean newBest = this.storage.submitIfBetter(arena, s.playerId, player.getName(), s.finalMs, s.splits.clone());
+		final boolean newBest = this.storage.submitRun(arena, s.playerId, player.getName(), s.finalMs, s.penaltyMs, s.splits.clone());
 		final boolean rewarded = !blacklisted && this.giveReward(s, player);
 		final int position = heat.event ? ++heat.finishedCount : 0;
 
@@ -1107,7 +1104,7 @@ public final class RaceManager {
 		s.deltaText = previousBest > 0L ? deltaText(deltaMs) : "";
 
 		Msg.title(player, "finish", "time", TimeFmt.format(s.finalMs), "arena", arena);
-		player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0F, 1.0F);
+		this.settings.soundFinish.play(player);
 
 		// Short pause with the result on screen, then back to the hub (the boat is removed on dispose)
 		this.later(s, this.settings.finishDelayTicks, () -> {
@@ -1163,7 +1160,7 @@ public final class RaceManager {
 		if (action == Settings.OffTrackAction.RESET && s.heat.event)
 			action = Settings.OffTrackAction.TELEPORT_BACK;
 
-		player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1.0F, 0.6F);
+		this.settings.soundOffTrack.play(player);
 
 		switch (action) {
 			case PENALTY -> {
@@ -1216,29 +1213,41 @@ public final class RaceManager {
 	// Rewards
 	// ------------------------------------------------------------------------------------------
 
-	/** @return true when reward commands were executed */
+	/**
+	 * @return true when the player gets the reward (ALWAYS: commands already ran; ONCE: the commands run as soon as
+	 *         the shared database confirms that this is really the first claim on the whole network)
+	 */
 	private boolean giveReward(final RaceSession s, final Player player) {
 		final Arena arena = s.heat.arena;
-		final List<String> commands = arena.getRewardCommands();
 
-		if (commands.isEmpty())
+		if (arena.getRewardCommands().isEmpty())
 			return false;
 
-		switch (arena.getRewardMode()) {
-			case NONE:
-				return false;
+		final List<String> commands = new ArrayList<>(arena.getRewardCommands());
+		final String arenaName = arena.getName();
+		final String playerName = player.getName();
+		final UUID uuid = player.getUniqueId();
+		final long time = s.finalMs;
 
-			case ONCE:
-				if (!this.storage.claimOnceReward(arena.getName(), s.playerId))
+		switch (arena.getRewardMode()) {
+			case ONCE -> {
+				if (this.storage.hasClaimedReward(arenaName, uuid))
 					return false;
 
-				break;
-
-			case ALWAYS:
-			default:
-				break;
+				this.storage.claimOnceReward(arenaName, uuid, () -> this.runRewardCommands(commands, arenaName, playerName, uuid, time));
+				return true;
+			}
+			case ALWAYS -> {
+				this.runRewardCommands(commands, arenaName, playerName, uuid, time);
+				return true;
+			}
+			default -> {
+				return false;
+			}
 		}
+	}
 
+	private void runRewardCommands(final List<String> commands, final String arena, final String player, final UUID uuid, final long timeMs) {
 		for (final String raw : commands) {
 			String command = raw.trim();
 
@@ -1246,20 +1255,18 @@ public final class RaceManager {
 				command = command.substring(1);
 
 			command = command
-					.replace("{player}", player.getName())
-					.replace("{uuid}", player.getUniqueId().toString())
-					.replace("{arena}", arena.getName())
-					.replace("{time}", TimeFmt.format(s.finalMs));
+					.replace("{player}", player)
+					.replace("{uuid}", uuid.toString())
+					.replace("{arena}", arena)
+					.replace("{time}", TimeFmt.format(timeMs));
 
 			try {
 				Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
 
 			} catch (final Exception ex) {
-				this.plugin.getLogger().warning("Reward command '" + command + "' of arena " + arena.getName() + " failed: " + ex.getMessage());
+				this.plugin.getLogger().warning("Reward command '" + command + "' of arena " + arena + " failed: " + ex.getMessage());
 			}
 		}
-
-		return true;
 	}
 
 	// ------------------------------------------------------------------------------------------

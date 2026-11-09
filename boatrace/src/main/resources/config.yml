@@ -1,4 +1,75 @@
-# BoatRace - settings (arena definitions live in arenas.yml, times in database.db)
+# BoatRace - settings (arena definitions live in arenas.yml, times in the shared MariaDB database)
+
+Server:
+  Name: hub
+
+  # Optional group this server belongs to (must match server-groups in the proxy's config.yml).
+  # Group bans on this group also apply here. Leave empty for none.
+  Group: ''
+
+# -------------------------------------------------------------------------------------------------
+# The shared MariaDB database (the same one the proxy uses).
+# -------------------------------------------------------------------------------------------------
+Database:
+  Host: 10.40.0.10
+  Port: 3306
+  Name: name
+  User: user
+  Password: pass
+  Pool_Size: 6
+  Connection_Timeout_Millis: 10000
+
+  # A pooled connection is replaced after Max_Lifetime_Millis, and idle ones are pinged every Keepalive_Millis. Both keep a database
+  # server or firewall that closes quiet connections (MariaDB wait_timeout, idle limits) from leaving dead ones in the pool, which
+  # shows up as "Failed to validate connection ... closed connection" warnings. Keep Max_Lifetime_Millis below the shortest such limit.
+  # Keepalive_Millis: 0 turns the ping off, otherwise it must be 30000 or more and below Max_Lifetime_Millis.
+  Max_Lifetime_Millis: 600000
+  Keepalive_Millis: 60000
+
+# Tables: boatrace_records (best times, column server_name = Server.Name of the server the time was driven on),
+# boatrace_runs (every finished race with server_name / server_group - for a web panel), boatrace_blacklist,
+# boatrace_rewards. Server and Database changes need a server restart (not /bre reload).
+records:
+  # how often (seconds) the leaderboard cache is reloaded from the database, so times from other servers show up
+  refresh-seconds: 30
+
+# -------------------------------------------------------------------------------------------------
+# Sounds: "sound" is a Bukkit Sound name (ENTITY_PLAYER_LEVELUP) or a sound key
+# (minecraft:entity.player.levelup, resource pack sounds work too). NONE = silent. Volume 0.0+, pitch 0.5 - 2.0.
+# -------------------------------------------------------------------------------------------------
+Sounds:
+  # every F1 lamp that lights up; the pitch rises by pitch-step per lamp (0 = constant)
+  start-countdown:
+    sound: BLOCK_NOTE_BLOCK_PLING
+    volume: 1.0
+    pitch: 0.6
+    pitch-step: 0.16
+  # lights out / green light
+  start-go:
+    sound: ENTITY_PLAYER_LEVELUP
+    volume: 1.0
+    pitch: 1.5
+  checkpoint:
+    sound: ENTITY_EXPERIENCE_ORB_PICKUP
+    volume: 0.8
+    pitch: 1.4
+  finish:
+    sound: UI_TOAST_CHALLENGE_COMPLETE
+    volume: 1.0
+    pitch: 1.0
+  off-track:
+    sound: BLOCK_NOTE_BLOCK_BASS
+    volume: 1.0
+    pitch: 0.6
+  jumpstart-penalty:
+    sound: ENTITY_VILLAGER_NO
+    volume: 1.0
+    pitch: 1.0
+  # finish line crossed with a skipped checkpoint
+  missed-checkpoint:
+    sound: ENTITY_VILLAGER_NO
+    volume: 1.0
+    pitch: 0.8
 
 # Command executed (as the player) when they press [HUB] or use /bre leave.
 # If it does not exist the player is teleported back to where they joined from.

@@ -46,10 +46,13 @@ public final class BoatRacePlugin extends SimplePlugin {
 		this.storage = new RecordStorage(this);
 
 		try {
-			this.storage.open();
+			this.storage.open(this.getConfig(), this.settings.serverName, this.settings.serverGroup, this.settings.recordsRefreshSeconds);
+			this.getLogger().info("Connected to MariaDB as server '" + this.settings.serverName + "'.");
 
 		} catch (final Exception ex) {
-			this.getLogger().log(Level.SEVERE, "Could not open the SQLite database - BoatRace is disabling itself.", ex);
+			this.getLogger().log(Level.SEVERE, "Could not connect to the MariaDB database (check Database in config.yml) - BoatRace is disabling itself.", ex);
+			this.storage.close();
+			this.storage = null;
 			this.getServer().getPluginManager().disablePlugin(this);
 
 			return;
