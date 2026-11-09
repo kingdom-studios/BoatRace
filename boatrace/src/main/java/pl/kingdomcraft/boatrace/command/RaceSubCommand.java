@@ -2,20 +2,22 @@ package pl.kingdomcraft.boatrace.command;
 
 import java.util.List;
 
-import org.bukkit.Location;
-import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.mineacademy.fo.command.SimpleCommandGroup;
 import org.mineacademy.fo.command.SimpleSubCommand;
 
 import pl.kingdomcraft.boatrace.BoatRacePlugin;
 import pl.kingdomcraft.boatrace.arena.Arena;
+import pl.kingdomcraft.boatrace.arena.Region;
 import pl.kingdomcraft.boatrace.util.Msg;
 
-/** Shared helpers of all /br sub commands. */
+/** Shared helpers of all /bre sub commands. */
 abstract class RaceSubCommand extends SimpleSubCommand {
 
 	static final String ADMIN_PERMISSION = "boatrace.admin";
+
+	/** Upper limit for one selection, so a typo in pos2 cannot create a zone of millions of blocks. */
+	static final long MAX_ZONE_VOLUME = 200_000L;
 
 	protected RaceSubCommand(final SimpleCommandGroup group, final String sublabel, final String description, final String usage, final int minArgs, final boolean admin) {
 		super(group, sublabel);
@@ -36,7 +38,7 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 	/** Returns the sender as a player or stops the command with a message. */
 	protected final Player requirePlayer() {
 		if (!(this.getSender() instanceof Player))
-			this.returnTell("&cTa komenda jest dostępna tylko dla graczy.");
+			this.returnTell("&cThis command can only be used by players.");
 
 		return (Player) this.getSender();
 	}
@@ -46,26 +48,37 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 		final Arena arena = this.plugin().getArenas().get(this.args[index]);
 
 		if (arena == null)
-			this.returnTell("&cNie ma areny o nazwie &f" + this.args[index] + "&c. Lista: &f/br list");
+			this.returnTell("&cArena &f" + this.args[index] + " &cdoes not exist. See &f/bre list");
 
 		return arena;
 	}
 
-	protected final void info(final String message) {
-		Msg.send(this.getSender(), message);
+	/** Returns the player's wand selection (pos1 + pos2) or stops the command with a message. */
+	protected final Region requireSelection(final Player player) {
+		final Region region = this.plugin().getSelections().getRegion(player);
+
+		if (region == null)
+			this.returnTell("&cSelect an area first: &f/bre wand &c(left click = pos1, right click = pos2) or &f/bre pos1&c / &f/bre pos2&c.");
+
+		if (region.volume() > MAX_ZONE_VOLUME)
+			this.returnTell("&cThe selection is too large (" + region.volume() + " blocks, max " + MAX_ZONE_VOLUME + ").");
+
+		return region;
 	}
 
-	/**
-	 * The block the player looks at (max {@code range} blocks) as a point, or - when looking at nothing - their own
-	 * standing location. Used for checkpoints and the finish.
-	 */
-	protected static Location targetOrStanding(final Player player, final int range) {
-		final Block target = player.getTargetBlockExact(range);
+	/** Warns when the spawn lies inside the start line (the boat must spawn BEFORE the line). */
+	protected final void warnSpawnPlacement(final Arena arena) {
+		if (arena.getSpawn() == null || arena.getStartLine() == null)
+			return;
 
-		if (target != null)
-			return target.getLocation().add(0.5D, 0.5D, 0.5D);
+		final org.bukkit.Location spawn = arena.getSpawn().toLocation();
 
-		return player.getLocation();
+		if (spawn != null && arena.getStartLine().contains(spawn))
+			this.info("&eWarning: the spawn is INSIDE the start line. Move the spawn a few blocks in front of the line so the start is triggered by driving through it.");
+	}
+
+	protected final void info(final String message) {
+		Msg.send(this.getSender(), message);
 	}
 
 	protected final List<String> arenaNames() {

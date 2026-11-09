@@ -8,6 +8,7 @@ import pl.kingdomcraft.boatrace.arena.ArenaManager;
 import pl.kingdomcraft.boatrace.command.BoatRaceCommand;
 import pl.kingdomcraft.boatrace.race.RaceListener;
 import pl.kingdomcraft.boatrace.race.RaceManager;
+import pl.kingdomcraft.boatrace.selection.SelectionManager;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
 
 /**
@@ -21,6 +22,7 @@ public final class BoatRacePlugin extends SimplePlugin {
 	private ArenaManager arenas;
 	private RecordStorage storage;
 	private RaceManager races;
+	private SelectionManager selections;
 
 	/** Foundation convention: typed access to the singleton instance. */
 	public static BoatRacePlugin getInstance() {
@@ -55,7 +57,10 @@ public final class BoatRacePlugin extends SimplePlugin {
 
 		this.registerEvents(new RaceListener(this.races));
 
-		// /boatrace (alias /br)
+		this.selections = new SelectionManager(this);
+		this.registerEvents(this.selections);
+
+		// /boatrace (alias /bre - /br is taken by WorldEdit)
 		this.registerCommands(new BoatRaceCommand());
 
 		// The PlaceholderAPI expansion (BoatRaceExpansion) is registered automatically by Foundation.
@@ -70,7 +75,7 @@ public final class BoatRacePlugin extends SimplePlugin {
 			this.storage.close();
 	}
 
-	/** /br reload - config.yml + arenas.yml. Racers are sent to the hub first so nobody keeps a stale arena. */
+	/** /bre reload - config.yml + arenas.yml. Racers are sent to the hub first so nobody keeps a stale arena. */
 	public void reloadAll() {
 		if (this.races != null)
 			this.races.leaveAllToHub();
@@ -94,5 +99,9 @@ public final class BoatRacePlugin extends SimplePlugin {
 
 	public RaceManager getRaces() {
 		return this.races;
+	}
+
+	public SelectionManager getSelections() {
+		return this.selections;
 	}
 }

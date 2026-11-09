@@ -3,34 +3,44 @@ package pl.kingdomcraft.boatrace.command;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.mineacademy.fo.command.SimpleCommandGroup;
 
 import pl.kingdomcraft.boatrace.arena.Arena;
-import pl.kingdomcraft.boatrace.arena.Point;
+import pl.kingdomcraft.boatrace.arena.Region;
 
 final class SetFinishSub extends RaceSubCommand {
 
 	SetFinishSub(final SimpleCommandGroup group) {
-		super(group, "setfinish", "Ustaw metę (blok na który patrzysz, albo Twoja pozycja).", "<arena>", 1, true);
+		super(group, "setfinish|setfinishline", "Set a separate finish line to your wand selection ('clear' = use the start line).", "<arena> [clear]", 1, true);
 	}
 
 	@Override
 	protected void onCommand() {
-		final Player player = this.requirePlayer();
 		final Arena arena = this.requireArena(0);
-		final Location where = targetOrStanding(player, 30);
 
-		arena.setFinish(Point.of(where));
+		if (this.args.length > 1 && "clear".equalsIgnoreCase(this.args[1])) {
+			arena.setFinishLine(null);
+			this.plugin().getArenas().save();
+
+			this.info("&aArena &f" + arena.getName() + " &anow uses the start line as the finish line (circuit).");
+			return;
+		}
+
+		final Player player = this.requirePlayer();
+		final Region region = this.requireSelection(player);
+
+		arena.setFinishLine(region);
 		this.plugin().getArenas().save();
 
-		this.info("&aUstawiono metę areny &f" + arena.getName() + " &7(" + where.getBlockX() + ", " + where.getBlockY() + ", " + where.getBlockZ()
-				+ ")&a." + (arena.isReady() ? " Arena jest aktywna." : " &7Brakuje jeszcze spawnu (&f/br setspawn&7)."));
+		this.info("&aFinish line of &f" + arena.getName() + " &aset: &7" + region.describe());
 	}
 
 	@Override
 	protected List<String> tabComplete() {
-		return this.args.length == 1 ? this.completeLastWord(this.arenaNames()) : new ArrayList<>();
+		if (this.args.length == 1)
+			return this.completeLastWord(this.arenaNames());
+
+		return this.args.length == 2 ? this.completeLastWord("clear") : new ArrayList<>();
 	}
 }

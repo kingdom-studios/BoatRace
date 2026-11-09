@@ -30,16 +30,26 @@ final class RaceSession {
 
 	/** System.nanoTime() at lights out */
 	long startNanos;
-	/** accumulated time penalties (jumpstart) in ms, counted into the displayed clock from the start */
+	/** jumpstart penalty of THIS attempt in ms, counted into the displayed clock from the start. Never carried over. */
 	long penaltyMs;
 	boolean falstarted;
 
+	/** how many lamps are currently lit (0..lampCount) - decides the jumpstart penalty */
+	int litLamps;
+	/** lamps of this run (arena lamps, or the configured amount when the arena has no lamp blocks) */
+	int lampCount;
+
+	/** the racer crossed the start line after lights out - nothing else (checkpoints, finish) counts before that */
+	boolean crossedStart;
+	/** whether the boat was inside the start / finish zone after the previous move (edge detection) */
+	boolean inStartZone;
+	boolean inFinishZone;
+
 	int nextCheckpoint;
 	long[] splits = new long[0];
-	boolean leftFinishZone;
 
-	/** personal best (at the moment the run started) used for checkpoint deltas; null when none */
-	long[] bestSplits;
+	/** split times used for checkpoint deltas (personal best, or the track record); null when none */
+	long[] referenceSplits;
 	long bestTotalMs = -1L;
 
 	long finalMs;
@@ -48,11 +58,11 @@ final class RaceSession {
 	Location holdPos;
 
 	final List<BukkitTask> tasks = new ArrayList<>();
-	final List<Location> lampLocations = new ArrayList<>();
+	/** block locations of every lamp, in lighting order */
+	final List<List<Location>> lampBlocks = new ArrayList<>();
 
-	/** temporary action bar text with the checkpoint delta */
+	/** checkpoint delta shown permanently on the action bar until the next checkpoint overwrites it */
 	String deltaText = "";
-	long deltaUntilMs;
 
 	boolean restartQueued;
 	boolean disposed;

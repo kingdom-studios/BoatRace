@@ -47,6 +47,8 @@ public final class RecordStorage {
 	private final Map<String, Map<UUID, RaceRecord>> records = new HashMap<>();
 	private final Map<String, List<RaceRecord>> rankingCache = new HashMap<>();
 	private final Set<UUID> blacklist = new HashSet<>();
+	/** "arenaKey|uuid" of players who already received the one-time reward of an arena. Guarded by "this". */
+	private final Set<String> claimedRewards = new HashSet<>();
 
 	public RecordStorage(final JavaPlugin plugin) {
 		this.plugin = plugin;
@@ -73,11 +75,13 @@ public final class RecordStorage {
 					+ "arena TEXT NOT NULL, uuid TEXT NOT NULL, name TEXT NOT NULL, best_ms INTEGER NOT NULL, "
 					+ "splits TEXT NOT NULL DEFAULT '', updated INTEGER NOT NULL, PRIMARY KEY (arena, uuid))");
 			st.execute("CREATE TABLE IF NOT EXISTS blacklist (uuid TEXT PRIMARY KEY, name TEXT NOT NULL)");
+			st.execute("CREATE TABLE IF NOT EXISTS rewards (arena TEXT NOT NULL, uuid TEXT NOT NULL, claimed INTEGER NOT NULL, PRIMARY KEY (arena, uuid))");
 		}
 
 		this.records.clear();
 		this.blacklist.clear();
 		this.rankingCache.clear();
+		this.claimedRewards.clear();
 
 		try (Statement st = this.connection.createStatement(); ResultSet rs = st.executeQuery("SELECT arena, uuid, name, best_ms, splits FROM records")) {
 			while (rs.next())
@@ -99,6 +103,11 @@ public final class RecordStorage {
 					this.blacklist.add(UUID.fromString(rs.getString("uuid")));
 				} catch (final IllegalArgumentException ignored) {
 				}
+		}
+
+		try (Statement st = this.connection.createStatement(); ResultSet rs = st.executeQuery("SELECT arena, uuid FROM rewards")) {
+			while (rs.next())
+				this.claimedRewards.add(rs.getString("arena") + "|" + rs.getString("uuid"));
 		}
 	}
 
@@ -315,6 +324,35 @@ public final class RecordStorage {
 		this.rankingCache.clear();
 
 		return nowBlacklisted;
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// One-time rewards
+	// ------------------------------------------------------------------------------------------
+
+	/**
+	 * Marks the one-time reward of the arena as claimed by the player.
+	 *
+	 * @return true if it was NOT claimed before (= the reward should be given now)
+	 */
+	public synchronized boolean claimOnceReward(final String arena, final UUID uuid) {
+		final String arenaKey = key(arena);
+
+		if (!this.claimedRewards.add(arenaKey + "|" + uuid))
+			return false;
+
+		final long now = System.currentTimeMillis();
+
+		this.async(connection -> {
+			try (PreparedStatement ps = connection.prepareStatement("INSERT OR IGNORE INTO rewards (arena, uuid, claimed) VALUES (?, ?, ?)")) {
+				ps.setString(1, arenaKey);
+				ps.setString(2, uuid.toString());
+				ps.setLong(3, now);
+				ps.executeUpdate();
+			}
+		});
+
+		return true;
 	}
 
 	// ------------------------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import org.mineacademy.fo.command.SimpleCommandGroup;
 final class ResetSub extends RaceSubCommand {
 
 	ResetSub(final SimpleCommandGroup group) {
-		super(group, "reset|restart", "Zrestartuj przejazd (nowa łódka, odliczanie od nowa).", null, 0, false);
+		super(group, "reset|restart", "Restart your run (new boat, new countdown, penalty cleared).", null, 0, false);
 	}
 
 	@Override

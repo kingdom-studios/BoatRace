@@ -12,7 +12,7 @@ import pl.kingdomcraft.boatrace.arena.Point;
 final class SetSpawnSub extends RaceSubCommand {
 
 	SetSpawnSub(final SimpleCommandGroup group) {
-		super(group, "setspawn", "Ustaw punkt startu/odrodzenia (Twoja pozycja i kierunek patrzenia).", "<arena>", 1, true);
+		super(group, "setspawn", "Set the boat spawn (your position and facing). Must be BEFORE the start line.", "<arena>", 1, true);
 	}
 
 	@Override
@@ -23,7 +23,8 @@ final class SetSpawnSub extends RaceSubCommand {
 		arena.setSpawn(Point.of(player.getLocation()));
 		this.plugin().getArenas().save();
 
-		this.info("&aUstawiono spawn areny &f" + arena.getName() + "&a. Łódka będzie ustawiona w tym kierunku.");
+		this.info("&aSpawn of &f" + arena.getName() + " &aset. The boat will face your current direction.");
+		this.warnSpawnPlacement(arena);
 	}
 
 	@Override

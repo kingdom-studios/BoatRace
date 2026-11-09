@@ -5,7 +5,7 @@ import org.mineacademy.fo.command.SimpleCommandGroup;
 final class LeaveSub extends RaceSubCommand {
 
 	LeaveSub(final SimpleCommandGroup group) {
-		super(group, "leave|hub", "Opuść wyścig i wróć na spawn.", null, 0, false);
+		super(group, "leave|hub", "Leave the race and go back to spawn.", null, 0, false);
 	}
 
 	@Override

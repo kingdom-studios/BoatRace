@@ -1,29 +1,27 @@
 # BoatRace - settings (arena definitions live in arenas.yml, times in database.db)
 
-# Command executed (as the player) when they press [HUB] or use /br leave.
+# Command executed (as the player) when they press [HUB] or use /bre leave.
 # If it does not exist the player is teleported back to where they joined from.
 hub-command: "spawn"
 
 # Boat entity type. Any *_BOAT entity type works (OAK_BOAT, BIRCH_BOAT, ...).
 boat-type: OAK_BOAT
 
-# Time penalty (seconds) added to the result for a jumpstart (moving / leaving the boat before lights out).
-jumpstart-penalty-seconds: 5.0
-
-# Detection radius (blocks) of invisible checkpoints and of the finish zone.
-checkpoint-radius: 4.0
-finish-radius: 5.0
+# Dynamic jumpstart penalty (moving / crossing the start line before lights out).
+# The earlier the jumpstart, the higher the penalty: moving before the first lamp lights up gives max-seconds,
+# moving after all lamps are lit gives min-seconds, linear in between (e.g. 5 lamps: 12.5, 10.9, 9.3, 7.7, 6.1, 4.5).
+jumpstart-penalty:
+  min-seconds: 4.5
+  max-seconds: 12.5
 
 start-lights:
-  lamps: 5                  # number of lamps in the row
-  height: 3                 # lamps are placed this many blocks above the start block
+  lamps: 5                  # how many lamps "/bre lights <arena> set" splits the wand selection into
   first-delay-ticks: 20     # delay before the first lamp lights up
   interval-ticks: 20        # delay between lamps
   hold-min-ticks: 10        # random pause between last lamp and lights out (min)
   hold-max-ticks: 50        # ... (max)
   lamp-on-block: RED_CONCRETE
-  lamp-off-block: BLACK_CONCRETE
-  linger-after-start-ticks: 60   # how long the "dark" lamps stay visible after the start
+  lamp-off-block: BLACK_CONCRETE   # lamps turn to this at lights out and STAY like that (client-side only)
 
 # Hotbar buttons given to racers (the player's real inventory is saved and restored).
 hotbar:

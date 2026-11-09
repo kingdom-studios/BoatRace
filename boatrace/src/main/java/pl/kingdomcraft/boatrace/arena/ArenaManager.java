@@ -17,6 +17,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 /** Loads / saves arenas.yml. All access happens on the main thread. */
 public final class ArenaManager {
 
+	/** Old (point based) checkpoints / finish are migrated into cubes of this radius. */
+	private static final int LEGACY_RADIUS = 3;
+
 	private final JavaPlugin plugin;
 	private final File file;
 	private final Map<String, Arena> arenas = new LinkedHashMap<>();
@@ -91,33 +94,43 @@ public final class ArenaManager {
 			final Arena arena = new Arena(name);
 
 			arena.setSpawn(Point.load(section.getConfigurationSection("spawn")));
-			arena.setStartBlock(Point.load(section.getConfigurationSection("start-block")));
-			arena.setLightsAlongX(section.getBoolean("lights-along-x", true));
-			arena.setFinish(Point.load(section.getConfigurationSection("finish")));
+			arena.setStartLine(Region.load(section.getConfigurationSection("start-line"), LEGACY_RADIUS));
+			arena.setFinishLine(Region.load(section.getConfigurationSection("finish"), LEGACY_RADIUS));
 
-			final ConfigurationSection cps = section.getConfigurationSection("checkpoints");
+			arena.getCheckpoints().addAll(loadList(section.getConfigurationSection("checkpoints")));
+			arena.getLights().addAll(loadList(section.getConfigurationSection("lights")));
 
-			if (cps != null) {
-				final List<Integer> order = new ArrayList<>();
-
-				for (final String index : cps.getKeys(false))
-					try {
-						order.add(Integer.parseInt(index));
-					} catch (final NumberFormatException ignored) {
-					}
-
-				order.sort(Integer::compare);
-
-				for (final Integer index : order) {
-					final Point point = Point.load(cps.getConfigurationSection(String.valueOf(index)));
-
-					if (point != null)
-						arena.getCheckpoints().add(point);
-				}
-			}
+			arena.setRewardMode(Arena.RewardMode.parse(section.getString("reward.mode", "NONE")));
+			arena.getRewardCommands().addAll(section.getStringList("reward.commands"));
 
 			this.arenas.put(key(name), arena);
 		}
+	}
+
+	private static List<Region> loadList(final ConfigurationSection section) {
+		final List<Region> result = new ArrayList<>();
+
+		if (section == null)
+			return result;
+
+		final List<Integer> order = new ArrayList<>();
+
+		for (final String index : section.getKeys(false))
+			try {
+				order.add(Integer.parseInt(index));
+			} catch (final NumberFormatException ignored) {
+			}
+
+		order.sort(Integer::compare);
+
+		for (final Integer index : order) {
+			final Region region = Region.load(section.getConfigurationSection(String.valueOf(index)), LEGACY_RADIUS);
+
+			if (region != null)
+				result.add(region);
+		}
+
+		return result;
 	}
 
 	public void save() {
@@ -132,18 +145,24 @@ public final class ArenaManager {
 			if (arena.getSpawn() != null)
 				arena.getSpawn().save(yaml.createSection(base + ".spawn"));
 
-			if (arena.getStartBlock() != null)
-				arena.getStartBlock().save(yaml.createSection(base + ".start-block"));
+			if (arena.getStartLine() != null)
+				arena.getStartLine().save(yaml.createSection(base + ".start-line"));
 
-			yaml.set(base + ".lights-along-x", arena.isLightsAlongX());
-
-			if (arena.getFinish() != null)
-				arena.getFinish().save(yaml.createSection(base + ".finish"));
+			if (arena.getFinishLineRaw() != null)
+				arena.getFinishLineRaw().save(yaml.createSection(base + ".finish"));
 
 			int index = 0;
 
-			for (final Point checkpoint : arena.getCheckpoints())
+			for (final Region checkpoint : arena.getCheckpoints())
 				checkpoint.save(yaml.createSection(base + ".checkpoints." + index++));
+
+			index = 0;
+
+			for (final Region lamp : arena.getLights())
+				lamp.save(yaml.createSection(base + ".lights." + index++));
+
+			yaml.set(base + ".reward.mode", arena.getRewardMode().name());
+			yaml.set(base + ".reward.commands", new ArrayList<>(arena.getRewardCommands()));
 		}
 
 		try {

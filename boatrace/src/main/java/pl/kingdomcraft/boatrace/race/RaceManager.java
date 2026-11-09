@@ -35,18 +35,23 @@ import net.kyori.adventure.title.Title;
 import pl.kingdomcraft.boatrace.Settings;
 import pl.kingdomcraft.boatrace.arena.Arena;
 import pl.kingdomcraft.boatrace.arena.ArenaManager;
-import pl.kingdomcraft.boatrace.arena.Point;
+import pl.kingdomcraft.boatrace.arena.Region;
 import pl.kingdomcraft.boatrace.storage.RaceRecord;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
 import pl.kingdomcraft.boatrace.util.Msg;
 import pl.kingdomcraft.boatrace.util.TimeFmt;
 
 /**
- * The race engine: join / leave / reset, start lights, jumpstart detection, invisible checkpoints, finish.
+ * The race engine: join / leave / reset, F1 start lights, dynamic jumpstart penalty, start line, invisible
+ * checkpoint zones, finish line and rewards.
+ *
+ * Lap validation: a finish only counts when the race was started correctly (lights out), the racer crossed the
+ * start line afterwards and then passed 100% of the checkpoints in order. This makes tracks where the start and
+ * finish line are the same zone safe - respawning in front of the line can never complete a lap.
  *
  * Performance notes:
  *  - ONE repeating task (every 2 ticks) updates the action bar of all racers, no per-player tasks.
- *  - Checkpoints are only evaluated inside VehicleMoveEvent of race boats (O(1) map lookup for any other vehicle).
+ *  - Zones are only evaluated inside VehicleMoveEvent of race boats (O(1) map lookup for any other vehicle).
  *  - Times use System.nanoTime(). Start lamps are client-side block changes, so the world is never modified.
  */
 public final class RaceManager {
@@ -95,7 +100,7 @@ public final class RaceManager {
 		this.leaveAll(LeaveMode.ORIGIN);
 	}
 
-	/** Used by /br reload. */
+	/** Used by /bre reload. */
 	public void leaveAllToHub() {
 		this.leaveAll(LeaveMode.HUB);
 	}
@@ -132,12 +137,12 @@ public final class RaceManager {
 	/** Joins the arena (or switches to it when the player already races). */
 	public void join(final Player player, final Arena arena) {
 		if (this.storage.isBlacklisted(player.getUniqueId())) {
-			Msg.send(player, "&cZostałeś wykluczony z wyścigów.");
+			Msg.send(player, "&cYou are banned from boat races.");
 			return;
 		}
 
 		if (!arena.isReady()) {
-			Msg.send(player, "&cArena &f" + arena.getName() + " &cnie jest jeszcze gotowa (brak spawnu lub mety).");
+			Msg.send(player, "&cArena &f" + arena.getName() + " &cis not ready yet (missing: " + arena.missing() + ").");
 			return;
 		}
 
@@ -145,10 +150,11 @@ public final class RaceManager {
 
 		if (existing != null) {
 			existing.arena = arena;
-			existing.penaltyMs = 0L;
-			this.startRun(existing, false);
+			this.startRun(existing);
 
-			Msg.send(player, "Przeniesiono na arenę &f" + arena.getName() + "&7.");
+			if (!existing.disposed)
+				Msg.send(player, "Switched to arena &f" + arena.getName() + "&7.");
+
 			return;
 		}
 
@@ -156,7 +162,7 @@ public final class RaceManager {
 		PlayerSnapshot.restore(this.plugin, player);
 
 		if (!PlayerSnapshot.save(this.plugin, player)) {
-			Msg.send(player, "&cNie udało się bezpiecznie zapisać Twojego ekwipunku - dołączenie anulowane.");
+			Msg.send(player, "&cYour inventory could not be saved safely - joining was cancelled.");
 			return;
 		}
 
@@ -169,35 +175,32 @@ public final class RaceManager {
 		player.setFireTicks(0);
 
 		this.giveHotbar(player);
-		this.startRun(session, false);
+		this.startRun(session);
 
 		if (session.disposed)
 			return;
 
-		Msg.send(player, "Dołączyłeś do areny &f" + arena.getName() + "&7. Powodzenia!");
+		Msg.send(player, "You joined arena &f" + arena.getName() + "&7. Good luck!");
 		player.sendMessage(this.buttons());
 	}
 
-	/** /br leave or the [HUB] button. */
+	/** /bre leave or the [HUB] button. Silent: no chat output at all. */
 	public void leave(final Player player) {
 		final RaceSession session = this.sessions.get(player.getUniqueId());
 
-		if (session == null) {
-			Msg.send(player, "&cNie bierzesz udziału w wyścigu.");
-			return;
-		}
-
-		this.dispose(session, LeaveMode.HUB);
+		if (session != null)
+			this.dispose(session, LeaveMode.HUB);
 	}
 
-	/** /br reset or the [RESET] button. */
+	/**
+	 * /bre reset or the [RESET] button. Silent: no chat output at all.
+	 * Starts a completely fresh attempt - a jumpstart penalty of the current attempt is wiped.
+	 */
 	public void reset(final Player player) {
 		final RaceSession session = this.sessions.get(player.getUniqueId());
 
-		if (session == null) {
-			Msg.send(player, "&cNie bierzesz udziału w wyścigu.");
+		if (session == null)
 			return;
-		}
 
 		final long now = System.currentTimeMillis();
 
@@ -205,9 +208,7 @@ public final class RaceManager {
 			return;
 
 		session.lastResetMs = now;
-
-		// A jumpstart penalty must not be washed away by resetting before the lights went out
-		this.startRun(session, session.state == RaceSession.State.COUNTDOWN);
+		this.startRun(session);
 	}
 
 	/** Runs the action of a hotbar button, returns false if the item is not a race button. */
@@ -234,7 +235,7 @@ public final class RaceManager {
 	// Run start (join + reset share this)
 	// ------------------------------------------------------------------------------------------
 
-	private void startRun(final RaceSession s, final boolean carryPenalty) {
+	private void startRun(final RaceSession s) {
 		final Player player = Bukkit.getPlayer(s.playerId);
 
 		if (player == null || !player.isOnline()) {
@@ -245,7 +246,7 @@ public final class RaceManager {
 		final Location spawn = s.arena.getSpawn() == null ? null : s.arena.getSpawn().toLocation();
 
 		if (spawn == null) {
-			Msg.send(player, "&cŚwiat areny nie jest załadowany.");
+			Msg.send(player, "&cThe arena world is not loaded.");
 			this.dispose(s, LeaveMode.HUB);
 			return;
 		}
@@ -253,25 +254,30 @@ public final class RaceManager {
 		// 1) kill the old boat right away (no entity spam), cancel old timers, restore fake lamps
 		this.cleanupRun(s);
 
-		// 2) reset the run state
-		final long keptPenalty = carryPenalty ? s.penaltyMs : 0L;
-
+		// 2) reset the run state - EVERYTHING, including any jumpstart penalty (it must never leak into a new attempt)
 		s.state = RaceSession.State.COUNTDOWN;
 		s.startNanos = 0L;
-		s.penaltyMs = keptPenalty;
+		s.penaltyMs = 0L;
 		s.falstarted = false;
+		s.litLamps = 0;
+		s.lampCount = 0;
+		s.crossedStart = false;
 		s.nextCheckpoint = 0;
 		s.splits = new long[s.arena.getCheckpoints().size()];
-		s.leftFinishZone = false;
 		s.finalMs = 0L;
 		s.deltaText = "";
-		s.deltaUntilMs = 0L;
 		s.restartQueued = false;
+
+		final Region start = s.arena.getStartLine();
+		final Region finish = s.arena.getFinishLine();
+
+		s.inStartZone = start != null && start.contains(spawn);
+		s.inFinishZone = finish != null && finish.contains(spawn);
 
 		final RaceRecord best = this.storage.getRecord(s.arena.getName(), s.playerId);
 
-		s.bestSplits = best == null ? null : best.getSplits();
 		s.bestTotalMs = best == null ? -1L : best.getBestMs();
+		s.referenceSplits = this.referenceSplits(s.arena, best);
 
 		// 3) teleport the player to the start and seat them in a brand-new boat
 		s.internalTeleport = true;
@@ -286,7 +292,7 @@ public final class RaceManager {
 
 		if (!(spawned instanceof Boat boat)) {
 			spawned.remove();
-			Msg.send(player, "&cNie można utworzyć łódki - sprawdź 'boat-type' w config.yml.");
+			Msg.send(player, "&cCould not spawn the boat - check 'boat-type' in config.yml.");
 			this.dispose(s, LeaveMode.HUB);
 			return;
 		}
@@ -303,6 +309,19 @@ public final class RaceManager {
 
 		// 4) F1 start lights
 		this.beginCountdown(s);
+	}
+
+	/** Personal best splits, or - when the player has none - the splits of the track record. */
+	private long[] referenceSplits(final Arena arena, final RaceRecord personal) {
+		if (personal != null && personal.getSplits().length > 0)
+			return personal.getSplits();
+
+		final List<RaceRecord> top = this.storage.getTop(arena.getName());
+
+		if (!top.isEmpty() && top.get(0).getSplits().length > 0)
+			return top.get(0).getSplits();
+
+		return null;
 	}
 
 	/** Cancels timers, restores the fake lamp blocks and kills the boat. Does not touch the session maps. */
@@ -359,25 +378,30 @@ public final class RaceManager {
 	// ------------------------------------------------------------------------------------------
 
 	private void beginCountdown(final RaceSession s) {
-		s.lampLocations.addAll(this.lampLocations(s.arena));
+		for (final Region lamp : s.arena.getLights())
+			s.lampBlocks.add(lamp.blocks());
+
+		s.lampCount = s.lampBlocks.isEmpty() ? this.settings.lamps : s.lampBlocks.size();
 
 		final Player player = Bukkit.getPlayer(s.playerId);
 
 		if (player != null)
-			this.showLamps(player, s, 0);
+			this.showLamps(player, s, 0); // all dark before the sequence starts
 
 		long delay = this.settings.firstDelayTicks;
 
-		for (int lit = 1; lit <= this.settings.lamps; lit++) {
+		for (int lit = 1; lit <= s.lampCount; lit++) {
 			final int litLamps = lit;
 
 			this.later(s, delay, () -> this.lampOn(s, litLamps));
 			delay += this.settings.intervalTicks;
 		}
 
+		// "delay" now points one interval after the last lamp; the random hold starts right at the last lamp
+		final long lastLamp = delay - this.settings.intervalTicks;
 		final int hold = ThreadLocalRandom.current().nextInt(this.settings.holdMinTicks, this.settings.holdMaxTicks + 1);
 
-		this.later(s, delay + hold, () -> this.lightsOut(s));
+		this.later(s, lastLamp + Math.max(this.settings.intervalTicks, hold), () -> this.lightsOut(s));
 	}
 
 	private void lampOn(final RaceSession s, final int lit) {
@@ -386,9 +410,10 @@ public final class RaceManager {
 		if (player == null || s.disposed || s.state != RaceSession.State.COUNTDOWN)
 			return;
 
+		s.litLamps = lit;
 		this.showLamps(player, s, lit);
 
-		final float pitch = 0.6F + 0.8F * ((float) lit / (float) this.settings.lamps);
+		final float pitch = 0.6F + 0.8F * ((float) lit / (float) s.lampCount);
 
 		player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1.0F, pitch);
 	}
@@ -399,64 +424,44 @@ public final class RaceManager {
 		if (player == null || s.disposed || s.state != RaceSession.State.COUNTDOWN)
 			return;
 
-		this.showLamps(player, s, 0); // all dark = GO
+		// All lamps turn black = GO. They stay black (they are only reverted on reset / leave).
+		this.showLamps(player, s, 0);
 
 		s.state = RaceSession.State.RUNNING;
 		s.startNanos = System.nanoTime();
 		s.restartFailures = 0;
 
+		// Fallback for a misconfigured spawn that lies inside the start line: the racer is already on the line
+		if (s.inStartZone)
+			s.crossedStart = true;
+
 		player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0F, 1.5F);
-		player.showTitle(Title.title(Msg.c("&a&lSTART!"), Component.empty(),
+		player.showTitle(Title.title(Msg.c("&a&lGO!"), Component.empty(),
 				Title.Times.times(Duration.ZERO, Duration.ofMillis(700), Duration.ofMillis(250))));
-
-		// the dark lamps stay visible for a moment, then the real blocks come back
-		this.later(s, this.settings.lingerTicks, () -> this.revertLamps(s));
 	}
 
-	private List<Location> lampLocations(final Arena arena) {
-		final List<Location> result = new ArrayList<>();
-		final Point startBlock = arena.getStartBlock();
-
-		if (startBlock == null)
-			return result;
-
-		final Location base = startBlock.toLocation();
-
-		if (base == null)
-			return result;
-
-		final Location center = base.getBlock().getLocation().add(0, this.settings.lampHeight, 0);
-		final int half = (this.settings.lamps - 1) / 2;
-
-		for (int i = 0; i < this.settings.lamps; i++) {
-			final int offset = i - half;
-
-			result.add(center.clone().add(arena.isLightsAlongX() ? offset : 0, 0, arena.isLightsAlongX() ? 0 : offset));
-		}
-
-		return result;
-	}
-
-	/** Shows the first {@code lit} lamps red and the rest dark - only to this player. */
+	/** Shows the first {@code lit} lamps lit and the rest dark - only to this player. */
 	private void showLamps(final Player player, final RaceSession s, final int lit) {
-		for (int i = 0; i < s.lampLocations.size(); i++)
-			player.sendBlockChange(s.lampLocations.get(i), i < lit ? this.settings.lampOn : this.settings.lampOff);
+		for (int i = 0; i < s.lampBlocks.size(); i++) {
+			final BlockData data = i < lit ? this.settings.lampOn : this.settings.lampOff;
+
+			for (final Location location : s.lampBlocks.get(i))
+				player.sendBlockChange(location, data);
+		}
 	}
 
 	private void revertLamps(final RaceSession s) {
-		if (s.lampLocations.isEmpty())
+		if (s.lampBlocks.isEmpty())
 			return;
 
 		final Player player = Bukkit.getPlayer(s.playerId);
 
 		if (player != null)
-			for (final Location location : s.lampLocations) {
-				final BlockData real = location.getBlock().getBlockData();
+			for (final List<Location> lamp : s.lampBlocks)
+				for (final Location location : lamp)
+					player.sendBlockChange(location, location.getBlock().getBlockData());
 
-				player.sendBlockChange(location, real);
-			}
-
-		s.lampLocations.clear();
+		s.lampBlocks.clear();
 	}
 
 	private void later(final RaceSession s, final long delayTicks, final Runnable runnable) {
@@ -464,7 +469,7 @@ public final class RaceManager {
 	}
 
 	// ------------------------------------------------------------------------------------------
-	// Movement: jumpstart, checkpoints, finish
+	// Movement: jumpstart, start line, checkpoints, finish
 	// ------------------------------------------------------------------------------------------
 
 	public void handleVehicleMove(final Vehicle vehicle, final Location from, final Location to) {
@@ -479,23 +484,35 @@ public final class RaceManager {
 			return;
 
 		switch (s.state) {
-			case COUNTDOWN -> this.handleCountdownMove(s, player, to);
+			case COUNTDOWN -> this.handleCountdownMove(s, player, from, to);
 			case RUNNING -> this.handleRunningMove(s, player, from, to);
 			default -> {
 			}
 		}
 	}
 
-	private void handleCountdownMove(final RaceSession s, final Player player, final Location to) {
+	private void handleCountdownMove(final RaceSession s, final Player player, final Location from, final Location to) {
 		if (s.holdPos == null || to.getWorld() != s.holdPos.getWorld())
 			return;
+
+		// crossing the start line before lights out
+		final Region start = s.arena.getStartLine();
+
+		if (start != null) {
+			final boolean wasIn = s.inStartZone;
+
+			s.inStartZone = start.contains(to);
+
+			if (!wasIn && start.intersects(from, to))
+				this.jumpstart(s, player);
+		}
 
 		final double dx = to.getX() - s.holdPos.getX();
 		final double dz = to.getZ() - s.holdPos.getZ();
 		final double distanceSquared = dx * dx + dz * dz;
 
 		if (distanceSquared > 0.25D) // moved more than half a block
-			this.jumpstart(s, player, "ruszyłeś przed zgaszeniem świateł");
+			this.jumpstart(s, player);
 
 		// keep the boat on the grid
 		if (distanceSquared > 1.0D && s.boat != null) {
@@ -506,62 +523,83 @@ public final class RaceManager {
 			} finally {
 				s.internalTeleport = false;
 			}
+
+			if (start != null)
+				s.inStartZone = start.contains(s.holdPos);
 		}
 	}
 
-	private void jumpstart(final RaceSession s, final Player player, final String reason) {
+	/** Dynamic penalty: the earlier the jumpstart (fewer lamps lit), the higher the penalty. */
+	private void jumpstart(final RaceSession s, final Player player) {
 		if (s.state != RaceSession.State.COUNTDOWN || s.falstarted)
 			return;
 
-		s.falstarted = true;
-		s.penaltyMs += this.settings.penaltyMs;
+		final long penalty = this.settings.penaltyFor(s.litLamps, s.lampCount);
 
-		Msg.send(player, "&c&lFALSTART! &7(" + reason + ") &c+" + TimeFmt.seconds2(this.settings.penaltyMs) + " kary");
+		s.falstarted = true;
+		s.penaltyMs = penalty;
+
+		player.showTitle(Title.title(Msg.c("&c&lJUMP START!"), Msg.c("&f+" + TimeFmt.seconds2(penalty) + " &cpenalty"),
+				Title.Times.times(Duration.ZERO, Duration.ofMillis(1500), Duration.ofMillis(400))));
 		player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.0F, 1.0F);
 	}
 
 	private void handleRunningMove(final RaceSession s, final Player player, final Location from, final Location to) {
-		final List<Point> checkpoints = s.arena.getCheckpoints();
+		final Region start = s.arena.getStartLine();
+		final Region finish = s.arena.getFinishLine();
+
+		if (start == null || finish == null)
+			return;
+
+		// Edge detection: "entered" = was outside after the previous move and touches the zone during this one
+		final boolean startEntered = this.entered(start, s.inStartZone, from, to);
+		final boolean finishEntered = this.entered(finish, s.inFinishZone, from, to);
+
+		s.inStartZone = start.contains(to);
+		s.inFinishZone = finish.contains(to);
+
+		// 1) nothing counts until the racer has crossed the start line after lights out
+		if (!s.crossedStart) {
+			if (startEntered)
+				s.crossedStart = true;
+
+			return;
+		}
+
+		// 2) next checkpoint in order (invisible - nothing is ever displayed in the world)
+		final List<Region> checkpoints = s.arena.getCheckpoints();
 
 		// The run only counts the checkpoints that existed when it started (an admin may add more while it is running)
 		final int total = Math.min(checkpoints.size(), s.splits.length);
 
-		// 1) next checkpoint in order (invisible - nothing is ever displayed in the world)
-		if (s.nextCheckpoint < total) {
-			final Location center = checkpoints.get(s.nextCheckpoint).toLocation();
+		if (s.nextCheckpoint < total && checkpoints.get(s.nextCheckpoint).intersects(from, to))
+			this.checkpointReached(s, player, s.nextCheckpoint);
 
-			if (center != null && passesThrough(from, to, center, this.settings.checkpointRadius))
-				this.checkpointReached(s, player, s.nextCheckpoint);
-		}
-
-		// 2) finish
-		final Point finishPoint = s.arena.getFinish();
-		final Location finish = finishPoint == null ? null : finishPoint.toLocation();
-
-		if (finish == null)
+		// 3) finish - only with 100% of the checkpoints passed in order
+		if (!finishEntered)
 			return;
 
-		final boolean inFinish = passesThrough(from, to, finish, this.settings.finishRadius);
-
-		if (!inFinish) {
-			s.leftFinishZone = true; // start and finish may be close together on circuits
+		if (total > 0 && s.nextCheckpoint >= total) {
+			this.finish(s, player);
 			return;
 		}
 
-		if (!s.leftFinishZone)
-			return;
-
-		if (s.nextCheckpoint < total) {
-			Msg.send(player, "&cPominąłeś checkpoint &f" + (s.nextCheckpoint + 1) + "&7/&f" + total + "&c - bieg nie został zaliczony.");
+		// Driving back over the line right after the start is harmless; skipping checkpoints is not
+		if (s.nextCheckpoint > 0) {
+			player.showTitle(Title.title(Msg.c("&c&lMISSED CHECKPOINT"),
+					Msg.c("&7Checkpoint &f" + (s.nextCheckpoint + 1) + "&7/&f" + total + " &7was skipped - lap not counted"),
+					Title.Times.times(Duration.ZERO, Duration.ofMillis(2000), Duration.ofMillis(400))));
 			player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.0F, 0.8F);
 
 			this.queueRestart(s);
-			return;
 		}
-
-		this.finish(s, player);
 	}
 
+	private boolean entered(final Region region, final boolean wasInside, final Location from, final Location to) {
+		return !wasInside && region.intersects(from, to);
+	}
+
+	/** Silent: no chat output. The delta stays on the action bar until the next checkpoint. */
 	private void checkpointReached(final RaceSession s, final Player player, final int index) {
 		final long elapsed = this.elapsedMs(s);
 		final int total = s.splits.length;
@@ -569,19 +607,15 @@ public final class RaceManager {
 		s.splits[index] = elapsed;
 		s.nextCheckpoint = index + 1;
 
-		final String label = "&7Checkpoint &f" + (index + 1) + "&7/&f" + total + " &8» ";
+		final String label = "&7CP &f" + (index + 1) + "&7/&f" + total;
 
-		if (s.bestSplits != null && index < s.bestSplits.length && s.bestSplits[index] > 0L) {
-			final long delta = elapsed - s.bestSplits[index];
-			final String colored = (delta <= 0L ? "&a" : "&c") + TimeFmt.signedDelta(delta);
+		if (s.referenceSplits != null && index < s.referenceSplits.length && s.referenceSplits[index] > 0L) {
+			final long delta = elapsed - s.referenceSplits[index];
 
-			Msg.raw(player, label + colored);
-
-			s.deltaText = colored;
-			s.deltaUntilMs = System.currentTimeMillis() + 2500L;
+			s.deltaText = (delta <= 0L ? "&a&l" : "&c&l") + TimeFmt.signedDelta(delta) + " &8| " + label;
 
 		} else
-			Msg.raw(player, label + "&f" + TimeFmt.format(elapsed));
+			s.deltaText = label;
 
 		player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.8F, 1.4F);
 	}
@@ -596,18 +630,18 @@ public final class RaceManager {
 
 		Msg.raw(player, "&8&m                                        ");
 
-		String line = "&a&lMETA! &7Czas: &f" + TimeFmt.format(s.finalMs);
+		String line = "&a&lFINISH! &7Time: &f" + TimeFmt.format(s.finalMs);
 
 		if (s.penaltyMs > 0L)
-			line += " &c(w tym +" + TimeFmt.seconds2(s.penaltyMs) + " kary)";
+			line += " &c(incl. +" + TimeFmt.seconds2(s.penaltyMs) + " penalty)";
 
 		Msg.raw(player, line);
 
 		if (blacklisted)
-			Msg.raw(player, "&cJesteś wykluczony - wynik nie został zapisany.");
+			Msg.raw(player, "&cYou are banned - your time was not saved.");
 
 		else if (newBest) {
-			String record = "&6&lNOWY REKORD OSOBISTY!";
+			String record = "&6&lNEW PERSONAL BEST!";
 
 			if (previousBest > 0L)
 				record += " &a" + TimeFmt.signedDelta(s.finalMs - previousBest);
@@ -617,61 +651,86 @@ public final class RaceManager {
 			final int rank = this.storage.getRank(s.arena.getName(), s.playerId);
 
 			if (rank > 0)
-				Msg.raw(player, "&7Pozycja w rankingu: &e#" + rank);
+				Msg.raw(player, "&7Leaderboard position: &e#" + rank);
 
 		} else
-			Msg.raw(player, "&7Twój rekord: &f" + TimeFmt.format(previousBest) + " &c" + TimeFmt.signedDelta(s.finalMs - previousBest));
+			Msg.raw(player, "&7Your best: &f" + TimeFmt.format(previousBest) + " &c" + TimeFmt.signedDelta(s.finalMs - previousBest));
+
+		if (!blacklisted && this.giveReward(s, player))
+			Msg.raw(player, "&6You received a reward for finishing &f" + s.arena.getName() + "&6!");
 
 		Msg.raw(player, "&8&m                                        ");
 		player.sendMessage(this.buttons());
 
-		player.showTitle(Title.title(Msg.c("&a&lMETA"), Msg.c("&f" + TimeFmt.format(s.finalMs)),
+		player.showTitle(Title.title(Msg.c("&a&lFINISH"), Msg.c("&f" + TimeFmt.format(s.finalMs)),
 				Title.Times.times(Duration.ofMillis(100), Duration.ofMillis(2500), Duration.ofMillis(500))));
 		player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0F, 1.0F);
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Rewards
+	// ------------------------------------------------------------------------------------------
+
+	/** @return true when reward commands were executed */
+	private boolean giveReward(final RaceSession s, final Player player) {
+		final Arena arena = s.arena;
+		final List<String> commands = arena.getRewardCommands();
+
+		if (commands.isEmpty())
+			return false;
+
+		switch (arena.getRewardMode()) {
+			case NONE:
+				return false;
+
+			case ONCE:
+				if (!this.storage.claimOnceReward(arena.getName(), s.playerId))
+					return false;
+
+				break;
+
+			case ALWAYS:
+			default:
+				break;
+		}
+
+		for (final String raw : commands) {
+			String command = raw.trim();
+
+			if (command.startsWith("/"))
+				command = command.substring(1);
+
+			command = command
+					.replace("{player}", player.getName())
+					.replace("{uuid}", player.getUniqueId().toString())
+					.replace("{arena}", arena.getName())
+					.replace("{time}", TimeFmt.format(s.finalMs));
+
+			try {
+				Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
+
+			} catch (final Exception ex) {
+				this.plugin.getLogger().warning("Reward command '" + command + "' of arena " + arena.getName() + " failed: " + ex.getMessage());
+			}
+		}
+
+		return true;
 	}
 
 	private long elapsedMs(final RaceSession s) {
 		return (System.nanoTime() - s.startNanos) / 1_000_000L + s.penaltyMs;
 	}
 
-	/** True when the segment from -> to comes within {@code radius} of {@code center} (so fast boats cannot skip a zone). */
-	private static boolean passesThrough(final Location from, final Location to, final Location center, final double radius) {
-		if (to.getWorld() != center.getWorld())
-			return false;
-
-		final double ax = from.getX(), ay = from.getY(), az = from.getZ();
-		final double dx = to.getX() - ax, dy = to.getY() - ay, dz = to.getZ() - az;
-		final double lengthSquared = dx * dx + dy * dy + dz * dz;
-
-		double t = 0.0D;
-
-		if (lengthSquared > 1.0E-9D) {
-			t = ((center.getX() - ax) * dx + (center.getY() - ay) * dy + (center.getZ() - az) * dz) / lengthSquared;
-			t = Math.max(0.0D, Math.min(1.0D, t));
-		}
-
-		final double px = ax + dx * t - center.getX();
-		final double py = ay + dy * t - center.getY();
-		final double pz = az + dz * t - center.getZ();
-
-		return px * px + py * py + pz * pz <= radius * radius;
-	}
-
 	// ------------------------------------------------------------------------------------------
 	// Boat exit / quit / foreign teleports
 	// ------------------------------------------------------------------------------------------
 
-	/** The racer left the boat: boat gets removed and the player is sent back to the start (restart). */
+	/** The racer left the boat: boat gets removed and the player is sent back to the start (fresh attempt). */
 	public void handleVehicleExit(final Vehicle vehicle, final Entity exited) {
 		final RaceSession s = this.boats.get(vehicle.getUniqueId());
 
 		if (s == null || s.disposed || !s.playerId.equals(exited.getUniqueId()))
 			return;
-
-		final Player player = Bukkit.getPlayer(s.playerId);
-
-		if (player != null && s.state == RaceSession.State.COUNTDOWN)
-			this.jumpstart(s, player, "opuściłeś łódkę przed startem");
 
 		this.queueRestart(s);
 	}
@@ -687,7 +746,7 @@ public final class RaceManager {
 			if (s.disposed || this.sessions.get(s.playerId) != s)
 				return;
 
-			this.startRun(s, s.state == RaceSession.State.COUNTDOWN);
+			this.startRun(s);
 		});
 	}
 
@@ -738,8 +797,6 @@ public final class RaceManager {
 		if (this.sessions.isEmpty())
 			return;
 
-		final long now = System.currentTimeMillis();
-
 		for (final RaceSession s : new ArrayList<>(this.sessions.values())) {
 			if (s.disposed)
 				continue;
@@ -756,7 +813,7 @@ public final class RaceManager {
 
 				if (!s.boat.isValid() || !seated) {
 					if (++s.restartFailures > 5) {
-						Msg.send(player, "&cNie udało się posadzić Cię w łódce - opuszczasz wyścig.");
+						Msg.send(player, "&cCould not seat you in a boat - you have left the race.");
 						this.dispose(s, LeaveMode.HUB);
 						continue;
 					}
@@ -768,26 +825,26 @@ public final class RaceManager {
 
 			switch (s.state) {
 				case COUNTDOWN -> {
-					String text = "&7Czekaj na zgaszenie świateł...";
+					String text = "&7Wait for the lights to go out...";
 
 					if (s.penaltyMs > 0L)
-						text += " &c(+" + TimeFmt.seconds2(s.penaltyMs) + ")";
+						text = "&c&lJUMP START &c+" + TimeFmt.seconds2(s.penaltyMs) + " &7- press &eRESET &7to try again";
 
 					Msg.actionBar(player, text);
 				}
 				case RUNNING -> {
-					final String time = "&eCzas: &f" + TimeFmt.format(this.elapsedMs(s));
+					String text = "&eTime: &f" + TimeFmt.format(this.elapsedMs(s));
 
-					if (now < s.deltaUntilMs)
-						Msg.actionBar(player, s.deltaText + "  " + time);
+					if (s.penaltyMs > 0L)
+						text += " &c(+" + TimeFmt.seconds2(s.penaltyMs) + ")";
 
-					else if (s.penaltyMs > 0L)
-						Msg.actionBar(player, time + " &c(+" + TimeFmt.seconds2(s.penaltyMs) + ")");
+					// The checkpoint delta stays visible until the next checkpoint replaces it
+					if (!s.deltaText.isEmpty())
+						text = s.deltaText + " &8| " + text;
 
-					else
-						Msg.actionBar(player, time);
+					Msg.actionBar(player, text);
 				}
-				case FINISHED -> Msg.actionBar(player, "&aMeta! &fCzas: " + TimeFmt.format(s.finalMs));
+				case FINISHED -> Msg.actionBar(player, "&a&lFinish! &fTime: " + TimeFmt.format(s.finalMs));
 			}
 		}
 	}
@@ -800,8 +857,8 @@ public final class RaceManager {
 		if (!this.settings.hotbarEnabled)
 			return;
 
-		player.getInventory().setItem(this.settings.resetSlot, this.button(Material.CLOCK, "&e&lRESET", "reset"));
-		player.getInventory().setItem(this.settings.hubSlot, this.button(Material.RED_BED, "&c&lHUB &7(powrót na spawn)", "hub"));
+		player.getInventory().setItem(this.settings.resetSlot, this.button(Material.CLOCK, "&e&lRESET &7(restart the run)", "reset"));
+		player.getInventory().setItem(this.settings.hubSlot, this.button(Material.RED_BED, "&c&lHUB &7(back to spawn)", "hub"));
 	}
 
 	private ItemStack button(final Material material, final String name, final String action) {
@@ -825,11 +882,11 @@ public final class RaceManager {
 	/** Clickable [RESET] [HUB] chat buttons (work even with hotbar items disabled). */
 	private Component buttons() {
 		return Component.text("[RESET]", NamedTextColor.YELLOW, TextDecoration.BOLD)
-				.clickEvent(ClickEvent.runCommand("/br reset"))
-				.hoverEvent(HoverEvent.showText(Component.text("Jedź jeszcze raz")))
+				.clickEvent(ClickEvent.runCommand("/bre reset"))
+				.hoverEvent(HoverEvent.showText(Component.text("Race again")))
 				.append(Component.text("   "))
 				.append(Component.text("[HUB]", NamedTextColor.RED, TextDecoration.BOLD)
-						.clickEvent(ClickEvent.runCommand("/br leave"))
-						.hoverEvent(HoverEvent.showText(Component.text("Powrót na spawn"))));
+						.clickEvent(ClickEvent.runCommand("/bre leave"))
+						.hoverEvent(HoverEvent.showText(Component.text("Back to spawn"))));
 	}
 }

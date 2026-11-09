@@ -11,7 +11,7 @@ import pl.kingdomcraft.boatrace.arena.Arena;
 final class JoinSub extends RaceSubCommand {
 
 	JoinSub(final SimpleCommandGroup group) {
-		super(group, "join", "Dołącz do toru (bez nazwy: losowa arena).", "[arena]", 0, false);
+		super(group, "join", "Join a track (no name: random arena).", "[arena]", 0, false);
 	}
 
 	@Override
@@ -26,7 +26,7 @@ final class JoinSub extends RaceSubCommand {
 			arena = this.plugin().getRaces().pickRandomReadyArena();
 
 			if (arena == null)
-				this.returnTell("&cNie ma żadnej aktywnej areny.");
+				this.returnTell("&cThere is no ready arena.");
 		}
 
 		this.plugin().getRaces().join(player, arena);

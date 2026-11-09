@@ -2,12 +2,12 @@ name: BoatRace
 version: '${project.version}'
 main: pl.kingdomcraft.boatrace.BoatRacePlugin
 api-version: '26.2'
-authors: [Alek_Sialek]
-description: F1-style boat racing minigame (start lights, checkpoints, rankings).
+author: Alek_Sialek
+description: F1-style boat racing minigame (start lights, checkpoints, rankings, rewards).
 softdepend: [PlaceholderAPI]
 
-# Commands are registered dynamically by Foundation (SimpleCommandGroup), no "commands:" block needed.
+# Commands are registered dynamically by Foundation (SimpleCommandGroup "boatrace|bre"), no "commands:" block needed.
 permissions:
   boatrace.admin:
-    description: Arena setup and /br admin commands
+    description: Arena setup (wand, zones, lights, rewards) and /bre admin commands
     default: op
