@@ -23,7 +23,7 @@ final class SetFinishSub extends RaceSubCommand {
 			arena.setFinishLine(null);
 			this.plugin().getArenas().save();
 
-			this.info("&aArena &f" + arena.getName() + " &anow uses the start line as the finish line (circuit).");
+			this.info("arena.finish-cleared", "arena", arena.getName());
 			return;
 		}
 
@@ -33,7 +33,7 @@ final class SetFinishSub extends RaceSubCommand {
 		arena.setFinishLine(region);
 		this.plugin().getArenas().save();
 
-		this.info("&aFinish line of &f" + arena.getName() + " &aset: &7" + region.describe());
+		this.info("arena.finish-set", "arena", arena.getName(), "region", region.describe());
 	}
 
 	@Override

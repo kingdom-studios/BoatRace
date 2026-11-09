@@ -8,6 +8,7 @@ import org.mineacademy.fo.command.SimpleCommandGroup;
 import pl.kingdomcraft.boatrace.arena.Arena;
 import pl.kingdomcraft.boatrace.arena.Point;
 import pl.kingdomcraft.boatrace.arena.Region;
+import pl.kingdomcraft.boatrace.util.Msg;
 
 final class InfoSub extends RaceSubCommand {
 
@@ -20,13 +21,16 @@ final class InfoSub extends RaceSubCommand {
 		final Arena arena = this.requireArena(0);
 		final Point spawn = arena.getSpawn();
 
-		this.info("Arena &f" + arena.getName() + " " + (arena.isReady() ? "&a(ready)" : "&c(not ready - missing: " + arena.missing() + ")"));
-		this.info(" &8- &7Spawn: &f" + (spawn == null ? "-" : "(" + (int) Math.floor(spawn.x()) + ", " + (int) Math.floor(spawn.y()) + ", " + (int) Math.floor(spawn.z()) + ")"));
-		this.info(" &8- &7Start line: &f" + describe(arena.getStartLine()));
-		this.info(" &8- &7Finish line: &f" + (arena.getFinishLineRaw() == null ? "same as start line" : describe(arena.getFinishLineRaw())));
-		this.info(" &8- &7Checkpoints: &f" + arena.getCheckpoints().size());
-		this.info(" &8- &7Start lamps: &f" + arena.getLights().size());
-		this.info(" &8- &7Reward: &f" + arena.getRewardMode().name() + " &7(" + arena.getRewardCommands().size() + " commands)");
+		this.info("arena.info",
+				"arena", arena.getName(),
+				"status", arena.isReady() ? Msg.text("arena.info-ready") : Msg.text("arena.info-not-ready", "missing", arena.missing()),
+				"spawn", spawn == null ? "-" : "(" + (int) Math.floor(spawn.x()) + ", " + (int) Math.floor(spawn.y()) + ", " + (int) Math.floor(spawn.z()) + ")",
+				"start", describe(arena.getStartLine()),
+				"finish", arena.getFinishLineRaw() == null ? Msg.text("arena.info-same-as-start") : describe(arena.getFinishLineRaw()),
+				"checkpoints", arena.getCheckpoints().size(),
+				"lamps", arena.getLights().size(),
+				"reward_mode", arena.getRewardMode().name(),
+				"reward_count", arena.getRewardCommands().size());
 
 		this.warnSpawnPlacement(arena);
 	}

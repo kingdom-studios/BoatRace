@@ -14,7 +14,7 @@ final class WandSub extends RaceSubCommand {
 		final Player player = this.requirePlayer();
 
 		player.getInventory().addItem(this.plugin().getSelections().createWand());
-		this.info("&aYou received the &6BoatRace Wand&a. &eLeft click &aa block = pos1, &eright click &a= pos2.");
+		this.info("selection.wand-received");
 	}
 
 	@Override

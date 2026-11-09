@@ -38,7 +38,7 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 	/** Returns the sender as a player or stops the command with a message. */
 	protected final Player requirePlayer() {
 		if (!(this.getSender() instanceof Player))
-			this.returnTell("&cThis command can only be used by players.");
+			this.returnTell(Msg.text("command.only-players"));
 
 		return (Player) this.getSender();
 	}
@@ -48,7 +48,7 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 		final Arena arena = this.plugin().getArenas().get(this.args[index]);
 
 		if (arena == null)
-			this.returnTell("&cArena &f" + this.args[index] + " &cdoes not exist. See &f/bre list");
+			this.returnTell(Msg.text("command.arena-not-found", "arena", this.args[index]));
 
 		return arena;
 	}
@@ -58,10 +58,10 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 		final Region region = this.plugin().getSelections().getRegion(player);
 
 		if (region == null)
-			this.returnTell("&cSelect an area first: &f/bre wand &c(left click = pos1, right click = pos2) or &f/bre pos1&c / &f/bre pos2&c.");
+			this.returnTell(Msg.text("command.selection-required"));
 
 		if (region.volume() > MAX_ZONE_VOLUME)
-			this.returnTell("&cThe selection is too large (" + region.volume() + " blocks, max " + MAX_ZONE_VOLUME + ").");
+			this.returnTell(Msg.text("command.selection-too-large", "volume", region.volume(), "max", MAX_ZONE_VOLUME));
 
 		return region;
 	}
@@ -74,11 +74,17 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 		final org.bukkit.Location spawn = arena.getSpawn().toLocation();
 
 		if (spawn != null && arena.getStartLine().contains(spawn))
-			this.info("&eWarning: the spawn is INSIDE the start line. Move the spawn a few blocks in front of the line so the start is triggered by driving through it.");
+			this.info("command.spawn-inside-start");
 	}
 
-	protected final void info(final String message) {
-		Msg.send(this.getSender(), message);
+	/** Sends the messages.yml entry {@code key} (with the prefix) to the command sender. */
+	protected final void info(final String key, final Object... placeholders) {
+		Msg.send(this.getSender(), key, placeholders);
+	}
+
+	/** Stops the command with the messages.yml entry {@code key}. */
+	protected final void fail(final String key, final Object... placeholders) {
+		this.returnTell(Msg.text(key, placeholders));
 	}
 
 	protected final List<String> arenaNames() {

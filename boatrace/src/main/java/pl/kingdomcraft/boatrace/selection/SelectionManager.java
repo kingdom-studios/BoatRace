@@ -1,5 +1,6 @@
 package pl.kingdomcraft.boatrace.selection;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +24,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.text.Component;
 import pl.kingdomcraft.boatrace.arena.Region;
 import pl.kingdomcraft.boatrace.util.Msg;
 
@@ -46,11 +47,13 @@ public final class SelectionManager implements Listener {
 		final ItemStack item = new ItemStack(Material.GOLDEN_AXE);
 		final ItemMeta meta = item.getItemMeta();
 
-		meta.displayName(Msg.c("&6&lBoatRace Wand").decoration(TextDecoration.ITALIC, false));
-		meta.lore(List.of(
-				Msg.c("&eLeft click &7a block: set &fpos1").decoration(TextDecoration.ITALIC, false),
-				Msg.c("&eRight click &7a block: set &fpos2").decoration(TextDecoration.ITALIC, false),
-				Msg.c("&7Then: &f/bre setstart|setfinish|addcheckpoint|lights").decoration(TextDecoration.ITALIC, false)));
+		final List<Component> lore = new ArrayList<>();
+
+		for (final String line : Msg.lines("items.wand-lore"))
+			lore.add(Msg.item(line));
+
+		meta.displayName(Msg.item(Msg.text("items.wand-name")));
+		meta.lore(lore);
 		meta.getPersistentDataContainer().set(this.wandKey, PersistentDataType.BYTE, (byte) 1);
 		item.setItemMeta(meta);
 
@@ -68,14 +71,13 @@ public final class SelectionManager implements Listener {
 		selection[index] = location.getBlock().getLocation();
 
 		final Location block = selection[index];
-		String text = "&aPos" + (index + 1) + " set to &f(" + block.getBlockX() + ", " + block.getBlockY() + ", " + block.getBlockZ() + ")";
-
 		final Region region = this.getRegion(player);
 
-		if (region != null)
-			text += " &7| selection " + region.sizeX() + "x" + region.sizeY() + "x" + region.sizeZ() + " (" + region.volume() + " blocks)";
-
-		Msg.send(player, text);
+		if (region == null)
+			Msg.send(player, "selection.pos-set", "pos", index + 1, "x", block.getBlockX(), "y", block.getBlockY(), "z", block.getBlockZ());
+		else
+			Msg.send(player, "selection.pos-set-size", "pos", index + 1, "x", block.getBlockX(), "y", block.getBlockY(), "z", block.getBlockZ(),
+					"size_x", region.sizeX(), "size_y", region.sizeY(), "size_z", region.sizeZ(), "volume", region.volume());
 	}
 
 	public Location getPosition(final Player player, final int index) {

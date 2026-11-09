@@ -30,6 +30,9 @@ public final class Settings {
 	public BlockData lampOn = Bukkit.createBlockData(Material.RED_CONCRETE);
 	public BlockData lampOff = Bukkit.createBlockData(Material.BLACK_CONCRETE);
 
+	/** pause between crossing the finish line and the teleport to the hub */
+	public int finishDelayTicks = 60;
+
 	public boolean hotbarEnabled = true;
 	public int resetSlot = 7;
 	public int hubSlot = 8;
@@ -57,6 +60,8 @@ public final class Settings {
 		this.holdMaxTicks = Math.max(this.holdMinTicks, c.getInt("start-lights.hold-max-ticks", 50));
 		this.lampOn = blockData(c.getString("start-lights.lamp-on-block"), Material.RED_CONCRETE);
 		this.lampOff = blockData(c.getString("start-lights.lamp-off-block"), Material.BLACK_CONCRETE);
+
+		this.finishDelayTicks = Math.max(0, c.getInt("finish-teleport-delay-ticks", 60));
 
 		this.hotbarEnabled = c.getBoolean("hotbar.enabled", true);
 		this.resetSlot = Math.max(0, Math.min(8, c.getInt("hotbar.reset-slot", 7)));

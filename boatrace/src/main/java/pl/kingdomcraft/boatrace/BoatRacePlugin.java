@@ -10,6 +10,7 @@ import pl.kingdomcraft.boatrace.race.RaceListener;
 import pl.kingdomcraft.boatrace.race.RaceManager;
 import pl.kingdomcraft.boatrace.selection.SelectionManager;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
+import pl.kingdomcraft.boatrace.util.Msg;
 
 /**
  * BoatRace - F1-style boat racing.
@@ -36,6 +37,8 @@ public final class BoatRacePlugin extends SimplePlugin {
 
 		this.settings = new Settings();
 		this.settings.load(this.getConfig());
+
+		Msg.load(this);
 
 		this.arenas = new ArenaManager(this);
 		this.arenas.load();
@@ -75,13 +78,14 @@ public final class BoatRacePlugin extends SimplePlugin {
 			this.storage.close();
 	}
 
-	/** /bre reload - config.yml + arenas.yml. Racers are sent to the hub first so nobody keeps a stale arena. */
+	/** /bre reload - config.yml + messages.yml + arenas.yml. Racers are sent to the hub first so nobody keeps a stale arena. */
 	public void reloadAll() {
 		if (this.races != null)
 			this.races.leaveAllToHub();
 
 		this.reloadConfig();
 		this.settings.load(this.getConfig());
+		Msg.load(this);
 		this.arenas.load();
 	}
 

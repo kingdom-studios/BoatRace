@@ -24,8 +24,7 @@ final class SetStartSub extends RaceSubCommand {
 		arena.setStartLine(region);
 		this.plugin().getArenas().save();
 
-		this.info("&aStart line of &f" + arena.getName() + " &aset: &7" + region.describe()
-				+ (arena.getFinishLineRaw() == null ? " &7(it is also the finish line - circuit)" : ""));
+		this.info(arena.getFinishLineRaw() == null ? "arena.start-set-circuit" : "arena.start-set", "arena", arena.getName(), "region", region.describe());
 		this.warnSpawnPlacement(arena);
 	}
 

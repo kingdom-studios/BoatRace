@@ -23,7 +23,7 @@ final class DelCheckpointSub extends RaceSubCommand {
 			arena.getCheckpoints().clear();
 			this.plugin().getArenas().save();
 
-			this.info("&aRemoved all &f" + count + " &acheckpoints of &f" + arena.getName() + "&a.");
+			this.info("arena.checkpoints-cleared", "count", count, "arena", arena.getName());
 			return;
 		}
 
@@ -33,17 +33,17 @@ final class DelCheckpointSub extends RaceSubCommand {
 			number = Integer.parseInt(this.args[1]);
 
 		} catch (final NumberFormatException ex) {
-			this.returnTell("&cNot a number: &f" + this.args[1]);
+			this.fail("arena.not-a-number", "value", this.args[1]);
 			return;
 		}
 
 		if (number < 1 || number > arena.getCheckpoints().size())
-			this.returnTell("&cArena &f" + arena.getName() + " &chas checkpoints 1-" + arena.getCheckpoints().size() + ".");
+			this.fail("arena.checkpoint-out-of-range", "arena", arena.getName(), "count", arena.getCheckpoints().size());
 
 		arena.getCheckpoints().remove(number - 1);
 		this.plugin().getArenas().save();
 
-		this.info("&aRemoved checkpoint &f#" + number + " &aof &f" + arena.getName() + "&a. The following ones moved up by one.");
+		this.info("arena.checkpoint-removed", "number", number, "arena", arena.getName());
 	}
 
 	@Override

@@ -49,14 +49,14 @@ final class RewardSub extends RaceSubCommand {
 			arena.getRewardCommands().clear();
 			this.plugin().getArenas().save();
 
-			this.info("&aRemoved all reward commands of &f" + arena.getName() + "&a.");
+			this.info("reward.cleared", "arena", arena.getName());
 			return;
 		}
 
 		final RewardMode mode = RewardMode.parse(action);
 
 		if (mode == null)
-			this.returnTell("&cUnknown mode &f" + this.args[1] + "&c. Use once, always, none, clear or info.");
+			this.fail("reward.unknown-mode", "value", this.args[1]);
 
 		arena.setRewardMode(mode);
 
@@ -71,24 +71,24 @@ final class RewardSub extends RaceSubCommand {
 
 		this.plugin().getArenas().save();
 
-		this.info("&aReward mode of &f" + arena.getName() + " &ais now &f" + mode.name() + "&a.");
+		this.info("reward.mode-set", "arena", arena.getName(), "mode", mode.name());
 
 		if (mode != RewardMode.NONE && arena.getRewardCommands().isEmpty())
-			this.info("&eNo reward command yet - add one: &f/bre reward " + arena.getName() + " " + action + " <command>");
+			this.info("reward.no-command", "arena", arena.getName(), "mode", action);
 
 		this.showInfo(arena);
 	}
 
 	private void showInfo(final Arena arena) {
-		this.info("Reward of &f" + arena.getName() + "&7: mode &f" + arena.getRewardMode().name());
+		this.info("reward.info-header", "arena", arena.getName(), "mode", arena.getRewardMode().name());
 
 		if (arena.getRewardCommands().isEmpty())
-			this.info(" &8- &7(no commands)");
+			this.info("reward.info-none");
 
 		int index = 1;
 
 		for (final String command : arena.getRewardCommands())
-			this.info(" &8" + index++ + ". &f/" + command);
+			this.info("reward.info-line", "number", index++, "command", command);
 	}
 
 	@Override

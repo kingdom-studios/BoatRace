@@ -1,0 +1,246 @@
+# BoatRace - every text shown by the plugin (chat, action bar, titles, item names).
+#
+# Color codes: & (e.g. &a, &l). Placeholders are written as {name} - each message lists the ones it supports.
+# {prefix} is inserted automatically in front of every CHAT message (except the finish summary, where you
+# can place it yourself). Set any message to "" (or an empty list) to disable it.
+# Values may be a single line or a list of lines. Reload with /bre reload.
+
+prefix: "&8[&bBoatRace&8] &7"
+
+# ------------------------------------------------------------------------------------------------
+# Action bar (refreshed every server tick)
+# ------------------------------------------------------------------------------------------------
+actionbar:
+  # Before lights out. {time}
+  countdown: "&eTime: &f{time}"
+  # Before lights out after a jump start. {time} {penalty}
+  countdown-penalty: "&eTime: &f{time} &c(+{penalty}s penalty)"
+  # While racing, before the first checkpoint (or when there is no personal best). {time}
+  running: "&eTime: &f{time}"
+  # While racing, after a checkpoint - the delta stays until the next checkpoint. {time} {delta_text}
+  running-delta: "&eTime: &f{time} {delta_text}"
+  # During the short pause after the finish. {time} {delta_text} (delta_text is empty without a previous best)
+  finished: "&a&lFINISH &8| &eTime: &f{time} {delta_text}"
+
+# How {delta_text} is built. {delta} = 1.23, {delta_padded} = 01.23
+delta:
+  faster: "&a(-{delta}s)"
+  slower: "&c(+{delta}s)"
+
+# ------------------------------------------------------------------------------------------------
+# Titles (title + subtitle, times in ticks)
+# ------------------------------------------------------------------------------------------------
+title:
+  go:
+    title: "&a&lGO!"
+    subtitle: ""
+    fade-in: 0
+    stay: 14
+    fade-out: 5
+  # {penalty}
+  jumpstart:
+    title: "&c&lJUMP START!"
+    subtitle: "&f+{penalty}s &cpenalty"
+    fade-in: 0
+    stay: 30
+    fade-out: 8
+  # {checkpoint} {total}
+  missed-checkpoint:
+    title: "&c&lMISSED CHECKPOINT"
+    subtitle: "&7Checkpoint &f{checkpoint}&7/&f{total} &7was skipped - lap not counted"
+    fade-in: 0
+    stay: 40
+    fade-out: 8
+  # {time} {arena}
+  finish:
+    title: "&a&lFINISH"
+    subtitle: "&f{time}"
+    fade-in: 2
+    stay: 50
+    fade-out: 10
+
+# ------------------------------------------------------------------------------------------------
+# Finish summary - the ONLY chat message a racer receives.
+# {player} {arena} {time} {penalty_note} {best} {delta} {rank} {reward_note}
+# ------------------------------------------------------------------------------------------------
+finish:
+  # first finished race on this arena
+  first:
+    - "&8&m                                                  "
+    - "  &a&lFINISH! &7Arena &f{arena}"
+    - "  &7Time: &f&l{time}{penalty_note}"
+    - "  &6&lFIRST PERSONAL BEST! &7Leaderboard: &e#{rank}"
+    - "{reward_note}"
+    - "&8&m                                                  "
+  # beat the previous personal best
+  new-best:
+    - "&8&m                                                  "
+    - "  &a&lFINISH! &7Arena &f{arena}"
+    - "  &7Time: &f&l{time}{penalty_note}"
+    - "  &6&lNEW PERSONAL BEST! &a-{delta}s &7Leaderboard: &e#{rank}"
+    - "{reward_note}"
+    - "&8&m                                                  "
+  # slower than the personal best
+  normal:
+    - "&8&m                                                  "
+    - "  &a&lFINISH! &7Arena &f{arena}"
+    - "  &7Time: &f&l{time}{penalty_note}"
+    - "  &7Personal best: &f{best} &c(+{delta}s)"
+    - "{reward_note}"
+    - "&8&m                                                  "
+  # banned players (time not saved)
+  banned:
+    - "&8&m                                                  "
+    - "  &a&lFINISH! &7Time: &f&l{time}{penalty_note}"
+    - "  &cYou are banned - your time was not saved."
+    - "&8&m                                                  "
+  # {penalty} - inserted as {penalty_note} when the run had a jump start penalty
+  penalty-note: " &c(incl. +{penalty}s penalty)"
+  # {arena} - inserted as {reward_note} when a reward was given (lines that end up empty are skipped)
+  reward-note: "  &6&lREWARD! &7You received the reward for finishing &f{arena}&7."
+
+# ------------------------------------------------------------------------------------------------
+# Hotbar items / wand
+# ------------------------------------------------------------------------------------------------
+items:
+  reset: "&e&lRESET &7(restart the run)"
+  hub: "&c&lHUB &7(back to spawn)"
+  wand-name: "&6&lBoatRace Wand"
+  wand-lore:
+    - "&eLeft click &7a block: set &fpos1"
+    - "&eRight click &7a block: set &fpos2"
+    - "&7Then: &f/bre setstart|setfinish|addcheckpoint|lights"
+
+# ------------------------------------------------------------------------------------------------
+# Chat messages (the prefix is added automatically)
+# ------------------------------------------------------------------------------------------------
+race:
+  banned: "&cYou are banned from boat races."
+  # {arena} {missing}
+  not-ready: "&cArena &f{arena} &cis not ready yet (missing: {missing})."
+  inventory-save-failed: "&cYour inventory could not be saved safely - joining was cancelled."
+  world-not-loaded: "&cThe arena world is not loaded."
+  boat-spawn-failed: "&cCould not spawn the boat - check 'boat-type' in config.yml."
+  seat-failed: "&cCould not seat you in a boat - you have left the race."
+
+command:
+  only-players: "&cThis command can only be used by players."
+  # {arena}
+  arena-not-found: "&cArena &f{arena} &cdoes not exist. See &f/bre list"
+  # {player}
+  player-not-found: "&cPlayer &f{player} &cis not online."
+  player-not-found-offline: "&cPlayer &f{player} &cnot found (they must have joined the server before)."
+  no-ready-arena: "&cThere is no ready arena."
+  join-others-no-permission: "&cYou do not have permission to send other players to a race."
+  join-console-needs-player: "&cUsage from the console: /bre join <random|arena> <player>"
+  reserved-name: "&cThe name &frandom &cis reserved."
+  selection-required: "&cSelect an area first: &f/bre wand &c(left click = pos1, right click = pos2) or &f/bre pos1&c / &f/bre pos2&c."
+  # {volume} {max}
+  selection-too-large: "&cThe selection is too large ({volume} blocks, max {max})."
+  spawn-inside-start: "&eWarning: the spawn is INSIDE the start line. Move the spawn a few blocks in front of the line so the start is triggered by driving through it."
+
+selection:
+  # {pos} {x} {y} {z}
+  pos-set: "&aPos{pos} set to &f({x}, {y}, {z})"
+  # {pos} {x} {y} {z} {size_x} {size_y} {size_z} {volume}
+  pos-set-size: "&aPos{pos} set to &f({x}, {y}, {z}) &7| selection {size_x}x{size_y}x{size_z} ({volume} blocks)"
+  wand-received: "&aYou received the &6BoatRace Wand&a. &eLeft click &aa block = pos1, &eright click &a= pos2."
+
+arena:
+  invalid-name: "&cArena name: 1-32 characters (letters, digits, _ and -)."
+  # {arena}
+  exists: "&cArena &f{arena} &calready exists."
+  created:
+    - "&aCreated arena &f{arena}&a. Next steps:"
+    - " &f1. /bre setspawn {arena} &7- stand a few blocks BEFORE the start line, facing the track"
+    - " &f2. /bre wand &7+ select the start line, then &f/bre setstart {arena}"
+    - " &f3. &7select each checkpoint zone in order, then &f/bre addcheckpoint {arena}"
+    - " &f4. &7(optional) &f/bre setfinish {arena} &7- otherwise the start line is the finish"
+    - " &f5. &7(optional) &f/bre lights {arena} add|set &7- F1 start lamps"
+    - " &f6. &7(optional) &f/bre reward {arena} once|always <command>"
+  spawn-set: "&aSpawn of &f{arena} &aset. The boat will face your current direction."
+  # {arena} {region}
+  start-set: "&aStart line of &f{arena} &aset: &7{region}"
+  start-set-circuit: "&aStart line of &f{arena} &aset: &7{region} &7(it is also the finish line - circuit)"
+  finish-set: "&aFinish line of &f{arena} &aset: &7{region}"
+  finish-cleared: "&aArena &f{arena} &anow uses the start line as the finish line (circuit)."
+  # {arena} {number} {region} {missing}
+  checkpoint-added: "&aAdded checkpoint &f#{number} &ato &f{arena}&a: &7{region}"
+  checkpoint-added-missing: "&aAdded checkpoint &f#{number} &ato &f{arena}&a: &7{region} (still missing: {missing})"
+  # {arena} {count}
+  checkpoints-cleared: "&aRemoved all &f{count} &acheckpoints of &f{arena}&a."
+  # {value}
+  not-a-number: "&cNot a number: &f{value}"
+  # {arena} {count}
+  checkpoint-out-of-range: "&cArena &f{arena} &chas checkpoints 1-{count}."
+  # {arena} {number}
+  checkpoint-removed: "&aRemoved checkpoint &f#{number} &aof &f{arena}&a. The following ones moved up by one."
+  list-empty: "&cNo arena has been created yet."
+  list-header: "Arenas:"
+  # {arena} {checkpoints}
+  list-ready: " &8- &f{arena} &a(ready) &7checkpoints: &f{checkpoints}"
+  # {arena} {checkpoints} {missing}
+  list-not-ready: " &8- &f{arena} &c(not ready, missing: {missing}) &7checkpoints: &f{checkpoints}"
+  # {arena} {status} {spawn} {start} {finish} {checkpoints} {lamps} {reward_mode} {reward_count}
+  info:
+    - "Arena &f{arena} {status}"
+    - " &8- &7Spawn: &f{spawn}"
+    - " &8- &7Start line: &f{start}"
+    - " &8- &7Finish line: &f{finish}"
+    - " &8- &7Checkpoints: &f{checkpoints}"
+    - " &8- &7Start lamps: &f{lamps}"
+    - " &8- &7Reward: &f{reward_mode} &7({reward_count} commands)"
+  info-ready: "&a(ready)"
+  # {missing}
+  info-not-ready: "&c(not ready - missing: {missing})"
+  info-same-as-start: "same as start line"
+
+lights:
+  # {arena}
+  cleared: "&aRemoved all start lamps of &f{arena}&a."
+  no-target: "&cSelect the lamp with the wand, or look at the lamp block (max 30 blocks)."
+  # {arena} {max} {volume}
+  lamp-too-big: "&cOne lamp may have at most {max} blocks (selection: {volume}). Use &f/bre lights {arena} set &cto split a row into lamps."
+  # {arena} {number} {region}
+  added: "&aAdded lamp &f#{number} &ato &f{arena}&a: &7{region} &7(selection cleared - select the next lamp)"
+  # {lamps}
+  too-short: "&cThe selection must be at least {lamps} blocks long (one block per lamp)."
+  # {volume} {max}
+  part-too-big: "&cEach lamp would have {volume} blocks (max {max}). Select a smaller row."
+  # {arena} {lamps}
+  set: "&aSet &f{lamps} &astart lamps for &f{arena}&a, lamp #1 is at pos1. They light up in order and turn black at lights out."
+
+reward:
+  # {arena} {mode}
+  info-header: "Reward of &f{arena}&7: mode &f{mode}"
+  info-none: " &8- &7(no commands)"
+  # {number} {command}
+  info-line: " &8{number}. &f/{command}"
+  # {arena}
+  cleared: "&aRemoved all reward commands of &f{arena}&a."
+  # {value}
+  unknown-mode: "&cUnknown mode &f{value}&c. Use once, always, none, clear or info."
+  # {arena} {mode}
+  mode-set: "&aReward mode of &f{arena} &ais now &f{mode}&a."
+  # {arena} {mode}
+  no-command: "&eNo reward command yet - add one: &f/bre reward {arena} {mode} <command>"
+
+admin:
+  reloaded: "&aReloaded config.yml, messages.yml and arenas.yml (racers were sent to spawn)."
+  # {player}
+  banned: "&aPlayer &f{player} &ais now banned from races and leaderboards."
+  unbanned: "&aPlayer &f{player} &ais no longer banned."
+  usage-blacklist: "&cUsage: /bre admin blacklist <player>"
+  usage-time: "&cUsage: /bre admin time <add|remove|reset> <player> ..."
+  # {action}
+  usage-time-amount: "&cUsage: /bre admin time {action} <player> <seconds|ms> [arena]"
+  # {value}
+  invalid-time: "&cInvalid time: &f{value} &7(examples: 5, 12.5s, 1500ms)"
+  # {player}
+  no-times: "&c{player} has no saved times."
+  # {player} {arena}
+  no-times-arena: "&c{player} has no saved times on arena {arena}."
+  # {player} {delta} {count}
+  time-changed: "&aChanged the time of &f{player} &aby &f{delta} &a(records: {count})."
+  # {player} {count}
+  time-reset: "&aReset the times of &f{player} &a(records: {count})."

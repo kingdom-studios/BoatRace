@@ -8,19 +8,29 @@ public final class TimeFmt {
 	private TimeFmt() {
 	}
 
-	/** 83456 -> "1:23.456" */
+	/** 83456 -> "01:23.456" */
 	public static String format(final long ms) {
 		final long safe = Math.max(0L, ms);
 		final long minutes = safe / 60_000L;
 		final long seconds = (safe / 1000L) % 60L;
 		final long millis = safe % 1000L;
 
-		return String.format(Locale.ROOT, "%d:%02d.%03d", minutes, seconds, millis);
+		return String.format(Locale.ROOT, "%02d:%02d.%03d", minutes, seconds, millis);
+	}
+
+	/** 320 -> "0.32" (absolute value, two decimals, no unit). */
+	public static String delta(final long ms) {
+		return String.format(Locale.ROOT, "%.2f", Math.abs(ms) / 1000.0D);
+	}
+
+	/** 1230 -> "01.23" (absolute value, at least two integer digits). */
+	public static String deltaPadded(final long ms) {
+		return String.format(Locale.ROOT, "%05.2f", Math.abs(ms) / 1000.0D);
 	}
 
 	/** 320 -> "0.32s" (absolute value, two decimals). */
 	public static String seconds2(final long ms) {
-		return String.format(Locale.ROOT, "%.2fs", Math.abs(ms) / 1000.0D);
+		return delta(ms) + "s";
 	}
 
 	/** Signed delta, e.g. "-0.32s" / "+1.05s". */

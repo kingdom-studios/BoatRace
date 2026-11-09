@@ -24,8 +24,8 @@ final class AddCheckpointSub extends RaceSubCommand {
 		arena.getCheckpoints().add(region);
 		this.plugin().getArenas().save();
 
-		this.info("&aAdded checkpoint &f#" + arena.getCheckpoints().size() + " &ato &f" + arena.getName() + "&a: &7" + region.describe()
-				+ (arena.isReady() ? "" : " &7(still missing: " + arena.missing() + ")"));
+		this.info(arena.isReady() ? "arena.checkpoint-added" : "arena.checkpoint-added-missing",
+				"number", arena.getCheckpoints().size(), "arena", arena.getName(), "region", region.describe(), "missing", arena.missing());
 	}
 
 	@Override

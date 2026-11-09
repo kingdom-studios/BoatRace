@@ -11,3 +11,6 @@ permissions:
   boatrace.admin:
     description: Arena setup (wand, zones, lights, rewards) and /bre admin commands
     default: op
+  boatrace.join.others:
+    description: /bre join <random|arena> <player> - send another player to a race
+    default: op

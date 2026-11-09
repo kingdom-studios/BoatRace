@@ -23,7 +23,7 @@ final class SetSpawnSub extends RaceSubCommand {
 		arena.setSpawn(Point.of(player.getLocation()));
 		this.plugin().getArenas().save();
 
-		this.info("&aSpawn of &f" + arena.getName() + " &aset. The boat will face your current direction.");
+		this.info("arena.spawn-set", "arena", arena.getName());
 		this.warnSpawnPlacement(arena);
 	}
 

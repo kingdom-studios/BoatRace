@@ -7,6 +7,10 @@ hub-command: "spawn"
 # Boat entity type. Any *_BOAT entity type works (OAK_BOAT, BIRCH_BOAT, ...).
 boat-type: OAK_BOAT
 
+# Delay (ticks, 20 = 1 second) between crossing the finish line and being sent to the hub (hub-command).
+# During this pause the final time is shown on the action bar / title. RESET still works meanwhile.
+finish-teleport-delay-ticks: 60
+
 # Dynamic jumpstart penalty (moving / crossing the start line before lights out).
 # The earlier the jumpstart, the higher the penalty: moving before the first lamp lights up gives max-seconds,
 # moving after all lamps are lit gives min-seconds, linear in between (e.g. 5 lamps: 12.5, 10.9, 9.3, 7.7, 6.1, 4.5).

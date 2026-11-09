@@ -13,13 +13,13 @@ final class ListSub extends RaceSubCommand {
 	@Override
 	protected void onCommand() {
 		if (this.plugin().getArenas().all().isEmpty())
-			this.returnTell("&cNo arena has been created yet.");
+			this.fail("arena.list-empty");
 
-		this.info("Arenas:");
+		this.info("arena.list-header");
 
 		for (final Arena arena : this.plugin().getArenas().all())
-			this.info(" &8- &f" + arena.getName() + " " + (arena.isReady() ? "&a(ready)" : "&c(not ready, missing: " + arena.missing() + ")")
-					+ " &7checkpoints: &f" + arena.getCheckpoints().size());
+			this.info(arena.isReady() ? "arena.list-ready" : "arena.list-not-ready",
+					"arena", arena.getName(), "checkpoints", arena.getCheckpoints().size(), "missing", arena.missing());
 	}
 
 	@Override

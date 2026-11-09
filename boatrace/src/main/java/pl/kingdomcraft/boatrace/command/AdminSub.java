@@ -8,6 +8,7 @@ import org.bukkit.OfflinePlayer;
 import org.mineacademy.fo.command.SimpleCommandGroup;
 
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
+import pl.kingdomcraft.boatrace.util.Msg;
 import pl.kingdomcraft.boatrace.util.TimeFmt;
 
 /**
@@ -40,14 +41,12 @@ final class AdminSub extends RaceSubCommand {
 		final String group = this.args[0].toLowerCase();
 
 		if ("blacklist".equals(group)) {
-			this.checkArgs(2, "&cUsage: /bre admin blacklist <player>");
+			this.checkArgs(2, Msg.text("admin.usage-blacklist"));
 
 			final OfflinePlayer target = this.findTarget(this.args[1]);
 			final boolean now = storage.toggleBlacklist(target.getUniqueId(), this.nameOf(target));
 
-			this.info(now
-					? "&aGracz &f" + this.nameOf(target) + " &ais now banned from races and leaderboards."
-					: "&aGracz &f" + this.nameOf(target) + " &ais no longer banned.");
+			this.info(now ? "admin.banned" : "admin.unbanned", "player", this.nameOf(target));
 
 			if (now && target.getPlayer() != null && this.plugin().getRaces().isRacing(target.getPlayer()))
 				this.plugin().getRaces().leave(target.getPlayer());
@@ -58,7 +57,7 @@ final class AdminSub extends RaceSubCommand {
 		if (!"time".equals(group))
 			this.returnInvalidArgs();
 
-		this.checkArgs(3, "&cUsage: /bre admin time <add|remove|reset> <player> ...");
+		this.checkArgs(3, Msg.text("admin.usage-time"));
 
 		final String action = this.args[1].toLowerCase();
 		final OfflinePlayer target = this.findTarget(this.args[2]);
@@ -66,7 +65,7 @@ final class AdminSub extends RaceSubCommand {
 
 		switch (action) {
 			case "add", "remove" -> {
-				this.checkArgs(4, "&cUsage: /bre admin time " + action + " <player> <seconds|ms> [arena]");
+				this.checkArgs(4, Msg.text("admin.usage-time-amount", "action", action));
 
 				final long amount;
 
@@ -74,7 +73,7 @@ final class AdminSub extends RaceSubCommand {
 					amount = TimeFmt.parseMillis(this.args[3]);
 
 				} catch (final NumberFormatException ex) {
-					this.returnTell("&cInvalid time: &f" + this.args[3] + " &7(examples: 5, 12.5s, 1500ms)");
+					this.fail("admin.invalid-time", "value", this.args[3]);
 					return;
 				}
 
@@ -83,18 +82,18 @@ final class AdminSub extends RaceSubCommand {
 				final int changed = storage.adjustTime(target.getUniqueId(), arena, delta);
 
 				if (changed == 0)
-					this.returnTell("&c" + name + " has no saved times" + (arena == null ? "." : " on arena " + arena + "."));
+					this.fail(arena == null ? "admin.no-times" : "admin.no-times-arena", "player", name, "arena", String.valueOf(arena));
 
-				this.info("&aChanged the time of &f" + name + " &aby &f" + TimeFmt.signedDelta(delta) + " &a(records: " + changed + ").");
+				this.info("admin.time-changed", "player", name, "delta", TimeFmt.signedDelta(delta), "count", changed);
 			}
 			case "reset" -> {
 				final String arena = this.optionalArena(3);
 				final int removed = storage.resetTimes(target.getUniqueId(), arena);
 
 				if (removed == 0)
-					this.returnTell("&c" + name + " has no saved times" + (arena == null ? "." : " on arena " + arena + "."));
+					this.fail(arena == null ? "admin.no-times" : "admin.no-times-arena", "player", name, "arena", String.valueOf(arena));
 
-				this.info("&aReset the times of &f" + name + " &a(records: " + removed + ").");
+				this.info("admin.time-reset", "player", name, "count", removed);
 			}
 			default -> this.returnInvalidArgs();
 		}
@@ -106,7 +105,7 @@ final class AdminSub extends RaceSubCommand {
 			return null;
 
 		if (!this.plugin().getArenas().exists(this.args[index]))
-			this.returnTell("&cArena &f" + this.args[index] + " &cdoes not exist.");
+			this.fail("command.arena-not-found", "arena", this.args[index]);
 
 		return this.plugin().getArenas().get(this.args[index]).getName();
 	}
@@ -118,7 +117,7 @@ final class AdminSub extends RaceSubCommand {
 			target = Bukkit.getOfflinePlayerIfCached(name);
 
 		if (target == null)
-			this.returnTell("&cPlayer &f" + name + " &cnot found (they must have joined the server before).");
+			this.fail("command.player-not-found-offline", "player", name);
 
 		return target;
 	}
