@@ -1,29 +1,43 @@
-# BoatRace (Paper 26.2, Foundation 6.10.2)
+# BoatRace
 
-Wyścigi łódek w stylu F1: światła startowe, falstart, niewidzialne checkpointy, delty do rekordu, rankingi SQLite, PlaceholderAPI.
+F1-style boat racing: start lights, false starts, invisible checkpoints, deltas to personal/track records, SQLite leaderboards, PlaceholderAPI support.
 
-## Budowanie
-```
+## Building
+
+```bash
 mvn clean package
+
 ```
-Wynik: `boatrace/target/BoatRace-1.0.0.jar` (Foundation wkompilowany i przeniesiony do `pl.kingdomcraft.boatrace.lib`).
 
-* Foundation budowany jest z **lokalnych źródeł** `lib/foundation` (moduł Mavena) - nie jest pobierany jako gotowa zależność.
-* Maven nadal pobiera **Paper API** oraz API wtyczek, do których odwołuje się kod Foundation (repozytoria w pom). Wymagany JDK 21+.
-* Jeśli `paper.version` (pom nadrzędny) się nie rozwiąże, wpisz dokładną wersję z repo.papermc.io. Gdyby moduł Foundation nie kompilował się na API 26.2, ustaw tam wersję z oryginalnego pom-a (26.3).
+Output: `boatrace/target/BoatRace-1.0.0.jar` (Foundation compiled and relocated to `pl.kingdomcraft.boatrace.lib`).
 
-## Komendy
-Gracz: `/br join [arena]`, `/br leave` (=[HUB]), `/br reset`, `/br list`
+* Foundation is built from **local source code** in `lib/foundation` (Maven module) — it is not downloaded as a pre-built dependency.
+* Maven still downloads the **Paper API** and plugin APIs referenced by Foundation's code (repositories specified in pom). Requires JDK 21+.
+* If `paper.version` (parent pom) fails to resolve, enter the exact version from repo.papermc.io. If the Foundation module fails to compile on API 26.2, set the version from the original pom (26.3) there.
+
+## Commands
+
+Player: `/br join [arena]`, `/br leave` (=[HUB]), `/br reset`, `/br list`
+
 Admin (`boatrace.admin`): `create`, `setspawn`, `setstartblock`, `addcheckpoint`, `setfinish` `<arena>`,
-`admin time add|remove <gracz> <czas> [arena]`, `admin time reset <gracz> [arena]`, `admin blacklist <gracz>` (przełącza), `reload`.
-Czas: `12.5` / `12.5s` = sekundy, `1500ms` = milisekundy.
 
-* `setstartblock` - patrz na blok linii startowej, nad nim (config: `start-lights.height`) pojawi się rząd lamp, prostopadły do kierunku patrzenia. Lampy są tylko po stronie klienta (świat się nie zmienia).
-* `addcheckpoint` / `setfinish` - użyty zostaje blok, na który patrzysz (do 30 bloków), a gdy patrzysz w powietrze - Twoja pozycja. Strefa = kula o promieniu z configu.
+`admin time add|remove <player> <time> [arena]`, `admin time reset <player> [arena]`, `admin blacklist <player>` (toggles), `reload`.
 
-## Placeholdery
-`%boatrace_besttime_<arena>%`, `%boatrace_top_player_<arena>_<poz>%`, `%boatrace_top_time_<arena>_<poz>%`
-Foundation podpina je pod PAPI i zwraca wartości tylko gdy zapytanie ma **online gracza** (zwykłe hologramy/scoreboardy je mają; `/papi parse --null` nie).
+Time format: `12.5` / `12.5s` = seconds, `1500ms` = milliseconds.
 
-## Pliki danych
-`config.yml` (ustawienia), `arenas.yml` (areny), `database.db` (SQLite: rekordy + splity + blacklist), `snapshots/` (kopia ekwipunku gracza na czas wyścigu, przywracana też po crashu).
+* `setstartblock`: Look at the starting line block; a row of lamps will appear above it (config: `start-lights.height`), perpendicular to your viewing direction. Lamps are client-side only (the world state does not change).
+* `addcheckpoint` / `setfinish`: Uses the block you are looking at (up to 30 blocks); if looking into the air, it uses your current position instead. Zone = a sphere with the radius specified in the config.
+
+## Placeholders
+
+`%boatrace_besttime_<arena>%`, `%boatrace_top_player_<arena>_<pos>%`, `%boatrace_top_time_<arena>_<pos>%`
+
+Foundation hooks into PAPI and only returns values when the request includes an **online player** (standard holograms/scoreboard plugins do; `/papi parse --null` does not).
+
+## Data Files
+
+`config.yml` (settings), `arenas.yml` (arenas), `database.db` (SQLite: records + splits + blacklist), `snapshots/` (player inventory backups taken during races, restored even after a server crash).
+
+## License
+
+Apache License 2.0, see LICENSE.
