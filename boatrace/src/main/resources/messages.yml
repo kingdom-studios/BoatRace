@@ -11,18 +11,20 @@ prefix: "&8[&bBoatRace&8] &7"
 # Action bar (refreshed every server tick)
 # ------------------------------------------------------------------------------------------------
 actionbar:
-  # Event lobby, waiting for /bre start. {time} {players} {slots} {position}
-  lobby: "&eTime: &f{time} &8| &7Grid position &f#{position} &8| &7Waiting for the start &f({players}/{slots})"
+  # {lap_text} in the lines below: shown only in multi-lap races, empty otherwise. {lap} {laps}
+  lap: "&7Lap &f{lap}&7/&f{laps} &8| "
+  # Event lobby, waiting for /bre start. {time} {players} {slots} {position} {laps} {lap_text}
+  lobby: "{lap_text}&eTime: &f{time} &8| &7Grid position &f#{position} &8| &7Waiting for the start &f({players}/{slots})"
   # Before lights out. {time}
-  countdown: "&eTime: &f{time}"
+  countdown: "{lap_text}&eTime: &f{time}"
   # Before lights out after a jump start. {time} {penalty}
-  countdown-penalty: "&eTime: &f{time} &c(+{penalty}s penalty)"
+  countdown-penalty: "{lap_text}&eTime: &f{time} &c(+{penalty}s penalty)"
   # While racing, before the first checkpoint (or when there is no personal best). {time}
-  running: "&eTime: &f{time}"
-  # While racing, after a checkpoint - the delta stays until the next checkpoint. {time} {delta_text}
-  running-delta: "&eTime: &f{time} {delta_text}"
+  running: "{lap_text}&eTime: &f{time}"
+  # While racing, after a checkpoint (or lap line) - the delta stays until the next one. {time} {delta_text} {lap} {laps} {lap_text}
+  running-delta: "{lap_text}&eTime: &f{time} {delta_text}"
   # During the short pause after the finish. {time} {delta_text} (delta_text is empty without a previous best)
-  finished: "&a&lFINISH &8| &eTime: &f{time} {delta_text}"
+  finished: "{lap_text}&a&lFINISH &8| &eTime: &f{time} {delta_text}"
 
 # How {delta_text} is built. {delta} = 1.23, {delta_padded} = 01.23
 delta:
@@ -81,7 +83,21 @@ title:
     fade-in: 0
     stay: 30
     fade-out: 8
-  # {time} {arena}
+  # a new lap begins (not the last one). {lap} {laps}
+  new-lap:
+    title: ""
+    subtitle: "&e&lLAP {lap}&7/&f{laps}"
+    fade-in: 0
+    stay: 25
+    fade-out: 8
+  # the last lap begins. {lap} {laps}
+  final-lap:
+    title: ""
+    subtitle: "&6&lFINAL LAP &7({lap}/{laps})"
+    fade-in: 0
+    stay: 30
+    fade-out: 8
+  # {time} {arena} {laps}
   finish:
     title: "&a&lFINISH"
     subtitle: "&f{time}"
@@ -91,14 +107,14 @@ title:
 
 # ------------------------------------------------------------------------------------------------
 # Finish summary - the ONLY chat message a racer receives.
-# {player} {arena} {time} {penalty_note} {best} {delta} {rank} {reward_note} {event_note}
+# {player} {arena} {time} {laps} {laps_note} {penalty_note} {best} {delta} {rank} {reward_note} {event_note}
 # ------------------------------------------------------------------------------------------------
 finish:
   # first finished race on this arena
   first:
     - "&8&m                                                  "
     - "  &a&lFINISH! &7Arena &f{arena}"
-    - "  &7Time: &f&l{time}{penalty_note}"
+    - "  &7Time: &f&l{time}{laps_note}{penalty_note}"
     - "  &6&lFIRST PERSONAL BEST! &7Leaderboard: &e#{rank}"
     - "{reward_note}"
     - "{event_note}"
@@ -107,7 +123,7 @@ finish:
   new-best:
     - "&8&m                                                  "
     - "  &a&lFINISH! &7Arena &f{arena}"
-    - "  &7Time: &f&l{time}{penalty_note}"
+    - "  &7Time: &f&l{time}{laps_note}{penalty_note}"
     - "  &6&lNEW PERSONAL BEST! &a-{delta}s &7Leaderboard: &e#{rank}"
     - "{reward_note}"
     - "{event_note}"
@@ -116,7 +132,7 @@ finish:
   normal:
     - "&8&m                                                  "
     - "  &a&lFINISH! &7Arena &f{arena}"
-    - "  &7Time: &f&l{time}{penalty_note}"
+    - "  &7Time: &f&l{time}{laps_note}{penalty_note}"
     - "  &7Personal best: &f{best} &c(+{delta}s)"
     - "{reward_note}"
     - "{event_note}"
@@ -124,9 +140,11 @@ finish:
   # banned players (time not saved)
   banned:
     - "&8&m                                                  "
-    - "  &a&lFINISH! &7Time: &f&l{time}{penalty_note}"
+    - "  &a&lFINISH! &7Time: &f&l{time}{laps_note}{penalty_note}"
     - "  &cYou are banned - your time was not saved."
     - "&8&m                                                  "
+  # {laps} - inserted as {laps_note} in multi-lap races
+  laps-note: " &7({laps} laps)"
   # {penalty} - inserted as {penalty_note} when the run had a jump start penalty
   penalty-note: " &c(incl. +{penalty}s penalty)"
   # {arena} - inserted as {reward_note} when a reward was given (lines that end up empty are skipped)
@@ -206,13 +224,14 @@ arena:
   spawn-set: "&aGrid position &f#{index} &aof &f{arena} &aset. The boat will face your current direction."
   spawn-removed: "&aRemoved grid position &f#{index} &aof &f{arena}&a."
   spawn-not-found: "&cArena &f{arena} &chas no grid position &f#{index}&c."
-  # {value} {max}
-  spawn-invalid-index: "&cGrid position must be a number from 1 to {max} (got &f{value}&c)."
+  # {value}
+  spawn-invalid-index: "&cGrid position must be a whole number of 1 or more (got &f{value}&c)."
+  # {value}
+  invalid-laps: "&cLaps must be a number from 1 to 999 (got &f{value}&c)."
+  # {arena} {laps}
+  laps-set: "&aA race on &f{arena} &anow has &f{laps} &alap(s). Events can override it: &f/bre start {arena} <laps>"
   # {arena} {spawns}
   spawn-list: "&7Grid positions of &f{arena}&7: &f{spawns}"
-  # {arena} {region}
-  signal-set: "&aStart signal of &f{arena} &aset: &7{region} &7(turns green at lights out)"
-  signal-cleared: "&aRemoved the start signal of &f{arena}&a."
   # {arena} {blocks}
   track-blocks: "&7Track blocks of &f{arena}&7: &f{blocks}"
   track-blocks-default: "&7Arena &f{arena} &7has no own track blocks - using config.yml defaults: &f{blocks}"
@@ -245,7 +264,7 @@ arena:
   list-ready: " &8- &f{arena} &a(ready) &7checkpoints: &f{checkpoints}"
   # {arena} {checkpoints} {missing}
   list-not-ready: " &8- &f{arena} &c(not ready, missing: {missing}) &7checkpoints: &f{checkpoints}"
-  # {arena} {status} {spawn} {start} {finish} {checkpoints} {lamps} {signal} {track_blocks} {fallback} {reward_mode} {reward_count}
+  # {arena} {status} {spawn} {start} {finish} {checkpoints} {lamps} {laps} {track_blocks} {fallback} {reward_mode} {reward_count}
   info:
     - "Arena &f{arena} {status}"
     - " &8- &7Grid positions: &f{spawn}"
@@ -253,7 +272,7 @@ arena:
     - " &8- &7Finish line: &f{finish}"
     - " &8- &7Checkpoints: &f{checkpoints}"
     - " &8- &7Start lamps: &f{lamps}"
-    - " &8- &7Start signal: &f{signal}"
+    - " &8- &7Laps: &f{laps}"
     - " &8- &7Track blocks: &f{track_blocks}"
     - " &8- &7Alternative maps: &f{fallback}"
     - " &8- &7Reward: &f{reward_mode} &7({reward_count} commands)"
@@ -313,9 +332,9 @@ admin:
   time-reset: "&aReset the times of &f{player} &a(records: {count})."
 
 event:
-  # {arena} {world} {slots}
-  opened: "&aEvent lobby opened on &f{arena} &7(world {world}, {slots} grid positions). Players join with &f/bre join {arena}&a, start with &f/bre start {arena}&a."
-  started: "&aEvent on &f{arena} &astarted - the lights are about to begin."
+  # {arena} {world} {slots} {laps}
+  opened: "&aEvent lobby opened on &f{arena} &7(world {world}, {slots} grid positions, {laps} lap(s)). Players join with &f/bre join {arena}&a, start with &f/bre start {arena} [laps]&a."
+  started: "&aEvent on &f{arena} &astarted (&f{laps} &alap(s)) - the lights are about to begin."
   closed: "&aEvent on &f{arena} &aclosed, all racers were sent to the hub."
   already-open: "&cThere is already an event on &f{arena}&c."
   already-started: "&cThe event on &f{arena} &chas already started."
@@ -323,5 +342,5 @@ event:
   not-ready: "&cArena &f{arena} &cis not ready yet."
   busy: "&cArena &f{arena} &cand all its alternative maps are busy - wait until the current races are over."
   empty: "&cNobody has joined the event on &f{arena} &cyet."
-  # {arena} {world} {phase} {players} {slots}
-  status: "&7Event on &f{arena}&7: &f{phase} &7in world &f{world}&7, racers &f{players}/{slots}"
+  # {arena} {world} {phase} {players} {slots} {laps}
+  status: "&7Event on &f{arena}&7: &f{phase} &7in world &f{world}&7, racers &f{players}/{slots}&7, laps &f{laps}"

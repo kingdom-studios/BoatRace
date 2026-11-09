@@ -27,7 +27,7 @@ final class InfoSub extends RaceSubCommand {
 				"finish", arena.getFinishLineRaw() == null ? Msg.text("arena.info-same-as-start") : describe(arena.getFinishLineRaw()),
 				"checkpoints", arena.getCheckpoints().size(),
 				"lamps", arena.getLights().size(),
-				"signal", describe(arena.getStartSignal()),
+				"laps", arena.getLaps(),
 				"track_blocks", TrackBlocksSub.describe(arena, this.plugin().getSettings().defaultTrackBlocks),
 				"fallback", this.plugin().getSettings().fallbackWorldsOf(arena.getName()).isEmpty() ? "-"
 						: String.join(", ", this.plugin().getSettings().fallbackWorldsOf(arena.getName())),

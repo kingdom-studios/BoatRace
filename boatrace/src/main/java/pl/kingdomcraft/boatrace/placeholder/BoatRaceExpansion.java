@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.mineacademy.fo.model.SimpleExpansion;
 
 import pl.kingdomcraft.boatrace.BoatRacePlugin;
+import pl.kingdomcraft.boatrace.arena.Arena;
 import pl.kingdomcraft.boatrace.storage.RaceRecord;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
 import pl.kingdomcraft.boatrace.util.TimeFmt;
@@ -20,6 +21,7 @@ import pl.kingdomcraft.boatrace.util.TimeFmt;
  *   %boatrace_top_time_<arena>_<position>%   time on that position
  *   %boatrace_top_server_<arena>_<position>% server (Server.Name) the time was driven on
  *
+ * Leaderboards are those of the arena's configured lap count (laps in arenas.yml).
  * Arena names may contain underscores. Registered automatically by Foundation (final class,
  * single private constructor + private static final instance).
  */
@@ -48,7 +50,7 @@ public final class BoatRaceExpansion extends SimpleExpansion {
 			if (!(sender instanceof Player player))
 				return empty;
 
-			final RaceRecord record = storage.getRecord(arena, player.getUniqueId());
+			final RaceRecord record = storage.getRecord(arena, lapsOf(plugin, arena), player.getUniqueId());
 
 			return record == null ? empty : TimeFmt.format(record.getBestMs());
 		}
@@ -74,7 +76,7 @@ public final class BoatRaceExpansion extends SimpleExpansion {
 				return NO_REPLACE;
 			}
 
-			final List<RaceRecord> top = storage.getTop(arena);
+			final List<RaceRecord> top = storage.getTop(arena, lapsOf(plugin, arena));
 
 			if (position < 1 || position > top.size())
 				return empty;
@@ -88,5 +90,11 @@ public final class BoatRaceExpansion extends SimpleExpansion {
 		}
 
 		return NO_REPLACE;
+	}
+
+	private static int lapsOf(final BoatRacePlugin plugin, final String arenaName) {
+		final Arena arena = plugin.getArenas().get(arenaName);
+
+		return arena == null ? 1 : arena.getLaps();
 	}
 }

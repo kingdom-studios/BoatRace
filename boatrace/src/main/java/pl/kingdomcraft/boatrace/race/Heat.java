@@ -53,6 +53,9 @@ final class Heat {
 	final Map<Location, BlockData> signalOriginal = new LinkedHashMap<>();
 	boolean signalGreen;
 
+	/** laps of this race (arena setting, or the override given when the event was opened / started) */
+	int laps;
+
 	/** how many racers of an event crossed the finish line (for the finishing position) */
 	int finishedCount;
 	/** number of racers when the lights went out */
@@ -63,6 +66,7 @@ final class Heat {
 		this.arena = arena;
 		this.event = event;
 		this.phase = event ? Phase.LOBBY : Phase.COUNTDOWN;
+		this.laps = arena.getLaps();
 	}
 
 	List<RaceSession> racers() {

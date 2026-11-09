@@ -81,21 +81,37 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 		}
 	}
 
-	/** Parses a grid position (1 .. grid.max-positions) or stops the command. */
+	/** Parses a grid position (1, 2, 3 ... no upper limit) or stops the command. */
 	protected final int gridIndex(final String raw) {
-		final int max = this.plugin().getSettings().maxGridPositions;
-
 		try {
 			final int index = Integer.parseInt(raw);
 
-			if (index >= 1 && index <= max)
+			if (index >= 1)
 				return index;
 
 		} catch (final NumberFormatException ignored) {
 		}
 
-		this.fail("arena.spawn-invalid-index", "value", raw, "max", max);
+		this.fail("arena.spawn-invalid-index", "value", raw);
 		return 1;
+	}
+
+	/** Parses an optional lap count at {@code index} (1 - 999), null when the argument is missing. */
+	protected final Integer optionalLaps(final int index) {
+		if (this.args.length <= index)
+			return null;
+
+		try {
+			final int laps = Integer.parseInt(this.args[index]);
+
+			if (laps >= 1 && laps <= 999)
+				return laps;
+
+		} catch (final NumberFormatException ignored) {
+		}
+
+		this.fail("arena.invalid-laps", "value", this.args[index]);
+		return null;
 	}
 
 	/** Sends the messages.yml entry {@code key} (with the prefix) to the command sender. */

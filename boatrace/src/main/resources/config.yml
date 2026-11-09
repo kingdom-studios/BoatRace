@@ -65,6 +65,11 @@ Sounds:
     sound: ENTITY_VILLAGER_NO
     volume: 1.0
     pitch: 1.0
+  # a lap is completed in a multi-lap race (start/finish line crossed with all checkpoints)
+  lap:
+    sound: BLOCK_NOTE_BLOCK_CHIME
+    volume: 1.0
+    pitch: 1.2
   # finish line crossed with a skipped checkpoint
   missed-checkpoint:
     sound: ENTITY_VILLAGER_NO
@@ -96,17 +101,17 @@ start-lights:
   hold-min-ticks: 10        # random pause between last lamp and lights out (min)
   hold-max-ticks: 50        # ... (max)
   lamp-on-block: RED_CONCRETE
-  lamp-off-block: BLACK_CONCRETE   # lamps turn to this at lights out and STAY like that (client-side only)
+  lamp-off-block: BLACK_CONCRETE   # unlit lamps (and all lamps after lights out when start-signal is disabled)
 
-# Start signal: blocks (selected with /bre startsignal <arena> set) that turn into "go-block" at lights out
-# and, after duration-seconds, into "off-block" again - this frees / resets the start line.
+# Start signal = the F1 lamps themselves (/bre lights): the same blocks light up red during the countdown, turn into
+# "go-block" at lights out and, after duration-seconds, into "off-block" - this frees / resets the start line.
+# enabled: false = the lamps simply go dark at lights out.
 start-signal:
   enabled: true
   # CLIENT = only the racers see the change (world untouched); WORLD = the real blocks change (e.g. a BARRIER gate)
   mode: CLIENT
   go-block: LIME_CONCRETE
-  # "" = the real block of the world. With mode WORLD and e.g. BARRIER here + go-block AIR you get a gate that
-  # opens at lights out and closes again after duration-seconds.
+  # "" = the real block of the world (e.g. build the lamps from black concrete), or any block such as AIR / BLACK_CONCRETE.
   off-block: ""
   duration-seconds: 5.0
 
@@ -127,9 +132,8 @@ off-track:
   # until you configure them. Example: [ICE, PACKED_ICE, BLUE_ICE]
   default-track-blocks: []
 
-# Grid positions per arena: /bre setspawn <arena> <1..max-positions>. Solo races always start on position #1.
-grid:
-  max-positions: 10
+# Grid positions per arena: /bre setspawn <arena> <1, 2, 3 ...> - unlimited. Solo races always start on position #1,
+# event racers get the next free position. Laps per arena: /bre laps <arena> <count> (events: /bre start <arena> <laps>).
 
 # Event mode: /bre event <arena> open -> joining players get grid positions 1, 2, 3 ...
 # The lights start with /bre start <arena>, or automatically once every position is taken.

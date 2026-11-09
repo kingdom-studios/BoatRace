@@ -32,8 +32,8 @@ public final class BoatRaceCommand extends SimpleCommandGroup {
 		this.registerSubcommand(new AddCheckpointSub(this));
 		this.registerSubcommand(new DelCheckpointSub(this));
 		this.registerSubcommand(new LightsSub(this));
-		this.registerSubcommand(new StartSignalSub(this));
 		this.registerSubcommand(new TrackBlocksSub(this));
+		this.registerSubcommand(new LapsSub(this));
 		this.registerSubcommand(new RewardSub(this));
 
 		// admin: events (multiplayer start)

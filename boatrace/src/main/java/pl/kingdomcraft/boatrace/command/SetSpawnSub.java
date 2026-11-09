@@ -13,7 +13,7 @@ import pl.kingdomcraft.boatrace.arena.Point;
 final class SetSpawnSub extends RaceSubCommand {
 
 	SetSpawnSub(final SimpleCommandGroup group) {
-		super(group, "setspawn", "Set grid position #index (default 1 = solo spawn) to your position and facing. Must be BEFORE the start line.", "<arena> [index]", 1, true);
+		super(group, "setspawn", "Set grid position #index (1, 2, 3 ... unlimited; default 1 = solo spawn) to your position and facing. Must be BEFORE the start line.", "<arena> [index]", 1, true);
 	}
 
 	@Override
@@ -35,10 +35,18 @@ final class SetSpawnSub extends RaceSubCommand {
 			return this.completeLastWord(this.arenaNames());
 
 		if (this.args.length == 2) {
+			// the existing positions plus the next free number
 			final List<String> indexes = new ArrayList<>();
+			final Arena arena = this.plugin().getArenas().get(this.args[0]);
+			int next = 1;
 
-			for (int i = 1; i <= this.plugin().getSettings().maxGridPositions; i++)
-				indexes.add(String.valueOf(i));
+			if (arena != null)
+				for (final Integer index : arena.getSpawns().keySet()) {
+					indexes.add(String.valueOf(index));
+					next = Math.max(next, index + 1);
+				}
+
+			indexes.add(String.valueOf(next));
 
 			return this.completeLastWord(indexes);
 		}

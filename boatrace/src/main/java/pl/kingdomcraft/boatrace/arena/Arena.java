@@ -37,7 +37,7 @@ public final class Arena {
 
 	private final String name;
 
-	/** Grid positions: index (1, 2, 3 ...) -> spawn. Solo races use the lowest index (normally #1). */
+	/** Grid positions: index (1, 2, 3 ... unlimited) -> spawn. Solo races use the lowest index (normally #1). */
 	private final TreeMap<Integer, Point> spawns = new TreeMap<>();
 	private Region startLine;
 	/** null = the start line is also the finish line (circuit) */
@@ -45,10 +45,11 @@ public final class Arena {
 	private final List<Region> checkpoints = new ArrayList<>();
 	/** F1 lamps in lighting order; every lamp may consist of several blocks */
 	private final List<Region> lights = new ArrayList<>();
-	/** blocks that change to the "go" block at lights out (optional) */
-	private Region startSignal;
 	/** blocks the boat must stay on; empty = the default list from config.yml */
 	private final Set<Material> trackBlocks = EnumSet.noneOf(Material.class);
+
+	/** laps of a normal race on this arena (events may override it) */
+	private int laps = 1;
 
 	private RewardMode rewardMode = RewardMode.NONE;
 	private final List<String> rewardCommands = new ArrayList<>();
@@ -119,16 +120,16 @@ public final class Arena {
 		return this.lights;
 	}
 
-	public Region getStartSignal() {
-		return this.startSignal;
-	}
-
-	public void setStartSignal(final Region startSignal) {
-		this.startSignal = startSignal;
-	}
-
 	public Set<Material> getTrackBlocks() {
 		return this.trackBlocks;
+	}
+
+	public int getLaps() {
+		return this.laps;
+	}
+
+	public void setLaps(final int laps) {
+		this.laps = Math.max(1, laps);
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -187,7 +188,6 @@ public final class Arena {
 
 		copy.startLine = this.startLine == null ? null : this.startLine.withWorld(world);
 		copy.finishLine = this.finishLine == null ? null : this.finishLine.withWorld(world);
-		copy.startSignal = this.startSignal == null ? null : this.startSignal.withWorld(world);
 
 		for (final Region checkpoint : this.checkpoints)
 			copy.checkpoints.add(checkpoint.withWorld(world));
@@ -196,6 +196,7 @@ public final class Arena {
 			copy.lights.add(lamp.withWorld(world));
 
 		copy.trackBlocks.addAll(this.trackBlocks);
+		copy.laps = this.laps;
 		copy.rewardMode = this.rewardMode;
 		copy.rewardCommands.addAll(this.rewardCommands);
 

@@ -118,7 +118,6 @@ public final class ArenaManager {
 
 			arena.getCheckpoints().addAll(loadList(section.getConfigurationSection("checkpoints")));
 			arena.getLights().addAll(loadList(section.getConfigurationSection("lights")));
-			arena.setStartSignal(Region.load(section.getConfigurationSection("start-signal"), 0));
 
 			for (final String raw : section.getStringList("track-blocks")) {
 				final Material material = Material.matchMaterial(raw);
@@ -129,6 +128,7 @@ public final class ArenaManager {
 					this.plugin.getLogger().warning("Arena " + name + ": unknown track block '" + raw + "' ignored.");
 			}
 
+			arena.setLaps(section.getInt("laps", 1));
 			arena.setRewardMode(Arena.RewardMode.parse(section.getString("reward.mode", "NONE")));
 			arena.getRewardCommands().addAll(section.getStringList("reward.commands"));
 
@@ -190,9 +190,6 @@ public final class ArenaManager {
 			for (final Region lamp : arena.getLights())
 				lamp.save(yaml.createSection(base + ".lights." + index++));
 
-			if (arena.getStartSignal() != null)
-				arena.getStartSignal().save(yaml.createSection(base + ".start-signal"));
-
 			final List<String> trackBlocks = new ArrayList<>();
 
 			for (final Material material : arena.getTrackBlocks())
@@ -200,6 +197,7 @@ public final class ArenaManager {
 
 			yaml.set(base + ".track-blocks", trackBlocks);
 
+			yaml.set(base + ".laps", arena.getLaps());
 			yaml.set(base + ".reward.mode", arena.getRewardMode().name());
 			yaml.set(base + ".reward.commands", new ArrayList<>(arena.getRewardCommands()));
 		}

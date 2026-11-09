@@ -51,6 +51,7 @@ public final class Settings {
 	public SoundSpec soundFinish = new SoundSpec("minecraft:ui.toast.challenge_complete", 1.0F, 1.0F);
 	public SoundSpec soundOffTrack = new SoundSpec("minecraft:block.note_block.bass", 1.0F, 0.6F);
 	public SoundSpec soundJumpstart = new SoundSpec("minecraft:entity.villager.no", 1.0F, 1.0F);
+	public SoundSpec soundLap = new SoundSpec("minecraft:block.note_block.chime", 1.0F, 1.2F);
 	public SoundSpec soundMissedCheckpoint = new SoundSpec("minecraft:entity.villager.no", 1.0F, 0.8F);
 
 	public String hubCommand = "spawn";
@@ -94,8 +95,7 @@ public final class Settings {
 	public int offTrackScanDepth = 3;
 	public final Set<Material> defaultTrackBlocks = EnumSet.noneOf(Material.class);
 
-	// --- grid / events ---
-	public int maxGridPositions = 10;
+	// --- events (the grid itself is unlimited: /bre setspawn <arena> <1, 2, 3 ...>) ---
 	public boolean eventAutoStartWhenFull = true;
 	public int eventStartDelayTicks = 60;
 
@@ -124,6 +124,7 @@ public final class Settings {
 		this.soundOffTrack = sound(c, "off-track", this.soundOffTrack);
 		this.soundJumpstart = sound(c, "jumpstart-penalty", this.soundJumpstart);
 		this.soundMissedCheckpoint = sound(c, "missed-checkpoint", this.soundMissedCheckpoint);
+		this.soundLap = sound(c, "lap", this.soundLap);
 
 		this.hubCommand = c.getString("hub-command", "spawn");
 
@@ -173,7 +174,6 @@ public final class Settings {
 				this.defaultTrackBlocks.add(material);
 		}
 
-		this.maxGridPositions = Math.max(1, Math.min(64, c.getInt("grid.max-positions", 10)));
 		this.eventAutoStartWhenFull = c.getBoolean("event.auto-start-when-full", true);
 		this.eventStartDelayTicks = Math.max(0, c.getInt("event.start-delay-ticks", 60));
 

@@ -54,7 +54,7 @@ import pl.kingdomcraft.boatrace.util.TimeFmt;
  *  - ONE repeating task (every tick, so the milliseconds run smoothly) updates the action bar of all racers and
  *    runs the off-track check every few ticks.
  *  - Zones are only evaluated inside VehicleMoveEvent of race boats (O(1) map lookup for any other vehicle).
- *  - Lamps (and the start signal in CLIENT mode) are client-side block changes, so the world is never modified.
+ *  - Lamps / start signal are client-side block changes (unless start-signal.mode is WORLD), so the world is not modified.
  */
 public final class RaceManager {
 
@@ -82,7 +82,7 @@ public final class RaceManager {
 	}
 
 	/** Read-only view of an event for /bre event status. */
-	public record EventInfo(String world, String phase, int players, int capacity) {
+	public record EventInfo(String world, String phase, int players, int capacity, int laps) {
 	}
 
 	private enum LeaveMode {
@@ -324,8 +324,12 @@ public final class RaceManager {
 	// Events (multiplayer start)
 	// ------------------------------------------------------------------------------------------
 
-	/** Opens an event lobby on a free instance of the arena. Joining players then take grid positions 1, 2, 3 ... */
-	public EventResult openEvent(final Arena arena) {
+	/**
+	 * Opens an event lobby on a free instance of the arena. Joining players then take grid positions 1, 2, 3 ...
+	 *
+	 * @param laps laps of the event, null = the arena's setting
+	 */
+	public EventResult openEvent(final Arena arena, final Integer laps) {
 		if (this.findEvent(arena) != null)
 			return EventResult.ALREADY_OPEN;
 
@@ -340,14 +344,21 @@ public final class RaceManager {
 		final Arena instance = world.equals(arena.getWorldName()) ? arena : arena.inWorld(world);
 		final Heat heat = new Heat(instanceKey(arena, world), instance, true);
 
+		if (laps != null)
+			heat.laps = Math.max(1, laps);
+
 		this.heats.put(heat.key, heat);
 		this.loadVisuals(heat);
 
 		return EventResult.OPENED;
 	}
 
-	/** /bre start <arena>: starts the lights of the event lobby. */
-	public EventResult startEvent(final Arena arena) {
+	/**
+	 * /bre start <arena> [laps]: starts the lights of the event lobby.
+	 *
+	 * @param laps overrides the laps of the event, null = keep
+	 */
+	public EventResult startEvent(final Arena arena, final Integer laps) {
 		final Heat heat = this.findEvent(arena);
 
 		if (heat == null)
@@ -358,6 +369,14 @@ public final class RaceManager {
 
 		if (heat.slots.isEmpty())
 			return EventResult.EMPTY;
+
+		if (laps != null && laps != heat.laps) {
+			heat.laps = Math.max(1, laps);
+
+			// splits / personal bests depend on the lap count
+			for (final RaceSession racer : heat.racers())
+				this.resetRunState(racer);
+		}
 
 		this.startEventCountdown(heat);
 
@@ -387,7 +406,7 @@ public final class RaceManager {
 		if (heat == null)
 			return null;
 
-		return new EventInfo(heat.arena.getWorldName(), heat.phase.name(), heat.slots.size(), heat.capacity());
+		return new EventInfo(heat.arena.getWorldName(), heat.phase.name(), heat.slots.size(), heat.capacity(), heat.laps);
 	}
 
 	private Heat findEvent(final Arena arena) {
@@ -415,7 +434,6 @@ public final class RaceManager {
 
 		if (player != null) {
 			this.showLamps(player, heat, 0);
-			this.showSignalIdle(player, heat);
 		}
 
 		if (this.settings.eventAutoStartWhenFull && heat.freeSlot() == -1)
@@ -590,8 +608,10 @@ public final class RaceManager {
 		s.penaltyMs = 0L;
 		s.falstarted = false;
 		s.crossedStart = false;
+		s.lap = 1;
 		s.nextCheckpoint = 0;
-		s.splits = new long[s.heat.arena.getCheckpoints().size()];
+		s.cpCount = s.heat.arena.getCheckpoints().size();
+		s.splits = new long[s.cpCount == 0 ? 0 : s.heat.laps * (s.cpCount + 1) - 1];
 		s.finalMs = 0L;
 		s.deltaText = "";
 		s.restartQueued = false;
@@ -599,7 +619,7 @@ public final class RaceManager {
 		s.offTrack = false;
 		s.offTrackTicks = 0;
 
-		final RaceRecord best = this.storage.getRecord(s.heat.arena.getName(), s.playerId);
+		final RaceRecord best = this.storage.getRecord(s.heat.arena.getName(), s.heat.laps, s.playerId);
 
 		s.bestTotalMs = best == null ? -1L : best.getBestMs();
 		s.referenceSplits = best == null || best.getSplits().length == 0 ? null : best.getSplits();
@@ -705,7 +725,10 @@ public final class RaceManager {
 	// Start lights + start signal
 	// ------------------------------------------------------------------------------------------
 
-	/** Loads the lamp / start signal block locations of the heat's instance. */
+	/**
+	 * Loads the lamp block locations of the heat's instance. The start signal IS the lamp structure: the same blocks
+	 * light up red during the countdown, turn green at lights out and switch to the off block afterwards.
+	 */
 	private void loadVisuals(final Heat heat) {
 		if (heat.lampBlocks.isEmpty())
 			for (final Region lamp : heat.arena.getLights())
@@ -713,8 +736,9 @@ public final class RaceManager {
 
 		heat.signalBlocks.clear();
 
-		if (this.settings.signalEnabled && heat.arena.getStartSignal() != null)
-			heat.signalBlocks.addAll(heat.arena.getStartSignal().blocks());
+		if (this.settings.signalEnabled)
+			for (final List<Location> lamp : heat.lampBlocks)
+				heat.signalBlocks.addAll(lamp);
 	}
 
 	private void beginCountdown(final Heat heat, final long extraDelay) {
@@ -731,7 +755,6 @@ public final class RaceManager {
 
 			if (player != null) {
 				this.showLamps(player, heat, 0); // all dark before the sequence starts
-				this.showSignalIdle(player, heat);
 			}
 		}
 
@@ -793,7 +816,8 @@ public final class RaceManager {
 			final Player player = Bukkit.getPlayer(racer.playerId);
 
 			if (player != null) {
-				// All lamps turn black = GO. They stay black (they are only reverted on reset / leave).
+				// All lamps go out = GO. With the start signal enabled they turn green right below and switch to the
+				// off block after start-signal.duration-seconds; without it they stay dark.
 				this.showLamps(player, heat, 0);
 				this.settings.soundGo.play(player);
 				Msg.title(player, "go");
@@ -811,15 +835,6 @@ public final class RaceManager {
 			for (final Location location : heat.lampBlocks.get(i))
 				player.sendBlockChange(location, data);
 		}
-	}
-
-	/** CLIENT mode: the start signal shows the off block (if one is configured) while waiting for lights out. */
-	private void showSignalIdle(final Player player, final Heat heat) {
-		if (this.settings.signalMode != Settings.SignalMode.CLIENT || this.settings.signalOff == null)
-			return;
-
-		for (final Location location : heat.signalBlocks)
-			player.sendBlockChange(location, this.settings.signalOff);
 	}
 
 	/** Lights out: the start signal turns green, and back to "off" after the configured duration. */
@@ -870,14 +885,10 @@ public final class RaceManager {
 			}
 	}
 
-	/** Shows the real blocks again to this player (lamps + CLIENT start signal). */
+	/** Shows the real blocks of the lamps (= start signal) again to this player. */
 	private void revertVisuals(final Player player, final Heat heat) {
 		for (final List<Location> lamp : heat.lampBlocks)
 			for (final Location location : lamp)
-				player.sendBlockChange(location, location.getBlock().getBlockData());
-
-		if (this.settings.signalMode == Settings.SignalMode.CLIENT)
-			for (final Location location : heat.signalBlocks)
 				player.sendBlockChange(location, location.getBlock().getBlockData());
 	}
 
@@ -1020,17 +1031,21 @@ public final class RaceManager {
 		final List<Region> checkpoints = arena.getCheckpoints();
 
 		// The run only counts the checkpoints that existed when it started (an admin may add more while it is running)
-		final int total = Math.min(checkpoints.size(), s.splits.length);
+		final int total = Math.min(checkpoints.size(), s.cpCount);
 
 		if (s.nextCheckpoint < total && checkpoints.get(s.nextCheckpoint).intersects(from, to))
 			this.checkpointReached(s, player, s.nextCheckpoint);
 
-		// 3) finish - only with 100% of the checkpoints passed in order
+		// 3) lap line / finish - only with 100% of the checkpoints of this lap passed in order
 		if (!finishEntered)
 			return;
 
 		if (total > 0 && s.nextCheckpoint >= total) {
-			this.finish(s, player);
+			if (s.lap < s.heat.laps)
+				this.lapCompleted(s, player);
+			else
+				this.finish(s, player);
+
 			return;
 		}
 
@@ -1052,15 +1067,39 @@ public final class RaceManager {
 	 * action bar next to the running time until the next checkpoint replaces it.
 	 */
 	private void checkpointReached(final RaceSession s, final Player player, final int index) {
-		final long elapsed = this.elapsedMs(s);
-
-		s.splits[index] = elapsed;
+		this.recordSplit(s, (s.lap - 1) * (s.cpCount + 1) + index);
 		s.nextCheckpoint = index + 1;
 
-		if (s.referenceSplits != null && index < s.referenceSplits.length && s.referenceSplits[index] > 0L)
-			s.deltaText = deltaText(elapsed - s.referenceSplits[index]);
-
 		this.settings.soundCheckpoint.play(player);
+	}
+
+	/** All checkpoints of a lap passed and the line crossed, but laps remain: count the lap and go on. */
+	private void lapCompleted(final RaceSession s, final Player player) {
+		this.recordSplit(s, (s.lap - 1) * (s.cpCount + 1) + s.cpCount);
+
+		s.lap++;
+		s.nextCheckpoint = 0;
+
+		Msg.title(player, s.lap == s.heat.laps ? "final-lap" : "new-lap", "lap", s.lap, "laps", s.heat.laps);
+		this.settings.soundLap.play(player);
+	}
+
+	/** Stores the elapsed time at a split and updates the permanent action bar delta to the personal best. */
+	private void recordSplit(final RaceSession s, final int splitIndex) {
+		if (splitIndex < 0 || splitIndex >= s.splits.length)
+			return;
+
+		final long elapsed = this.elapsedMs(s);
+
+		s.splits[splitIndex] = elapsed;
+
+		if (s.referenceSplits != null && splitIndex < s.referenceSplits.length && s.referenceSplits[splitIndex] > 0L)
+			s.deltaText = deltaText(elapsed - s.referenceSplits[splitIndex]);
+	}
+
+	/** "Lap 2/5 | " for multi-lap races, "" for single-lap ones (messages.yml actionbar.lap). */
+	private static String lapText(final RaceSession s) {
+		return s.heat.laps > 1 ? Msg.text("actionbar.lap", "lap", Math.min(s.lap, s.heat.laps), "laps", s.heat.laps) : "";
 	}
 
 	private void finish(final RaceSession s, final Player player) {
@@ -1071,7 +1110,7 @@ public final class RaceManager {
 		final String arena = heat.arena.getName();
 		final long previousBest = s.bestTotalMs;
 		final boolean blacklisted = this.storage.isBlacklisted(s.playerId);
-		final boolean newBest = this.storage.submitRun(arena, s.playerId, player.getName(), s.finalMs, s.penaltyMs, s.splits.clone());
+		final boolean newBest = this.storage.submitRun(arena, heat.laps, s.playerId, player.getName(), s.finalMs, s.penaltyMs, s.splits.clone());
 		final boolean rewarded = !blacklisted && this.giveReward(s, player);
 		final int position = heat.event ? ++heat.finishedCount : 0;
 
@@ -1096,14 +1135,16 @@ public final class RaceManager {
 				"penalty_note", s.penaltyMs > 0L ? Msg.text("finish.penalty-note", "penalty", TimeFmt.delta(s.penaltyMs)) : "",
 				"best", previousBest > 0L ? TimeFmt.format(previousBest) : "-",
 				"delta", TimeFmt.delta(deltaMs),
-				"rank", Math.max(0, this.storage.getRank(arena, s.playerId)),
+				"rank", Math.max(0, this.storage.getRank(arena, heat.laps, s.playerId)),
+				"laps", heat.laps,
+				"laps_note", heat.laps > 1 ? Msg.text("finish.laps-note", "laps", heat.laps) : "",
 				"reward_note", rewarded ? Msg.text("finish.reward-note", "arena", arena) : "",
 				"event_note", heat.event ? Msg.text("finish.event-note", "position", position, "racers", heat.fieldSize) : "");
 
 		// Shown on the action bar during the pause before the teleport
 		s.deltaText = previousBest > 0L ? deltaText(deltaMs) : "";
 
-		Msg.title(player, "finish", "time", TimeFmt.format(s.finalMs), "arena", arena);
+		Msg.title(player, "finish", "time", TimeFmt.format(s.finalMs), "arena", arena, "laps", heat.laps);
 		this.settings.soundFinish.play(player);
 
 		// Short pause with the result on screen, then back to the hub (the boat is removed on dispose)
@@ -1389,23 +1430,25 @@ public final class RaceManager {
 				continue;
 
 			switch (s.state) {
-				case LOBBY -> Msg.actionBar(player, "actionbar.lobby", "time", TimeFmt.format(0L),
+				case LOBBY -> Msg.actionBar(player, "actionbar.lobby", "time", TimeFmt.format(0L), "lap_text", lapText(s), "laps", s.heat.laps,
 						"players", s.heat.slots.size(), "slots", s.heat.capacity(), "position", s.slot);
 				case COUNTDOWN -> {
 					if (s.penaltyMs > 0L)
-						Msg.actionBar(player, "actionbar.countdown-penalty", "time", TimeFmt.format(0L), "penalty", TimeFmt.delta(s.penaltyMs));
+						Msg.actionBar(player, "actionbar.countdown-penalty", "time", TimeFmt.format(0L), "penalty", TimeFmt.delta(s.penaltyMs), "lap_text", lapText(s));
 					else
-						Msg.actionBar(player, "actionbar.countdown", "time", TimeFmt.format(0L));
+						Msg.actionBar(player, "actionbar.countdown", "time", TimeFmt.format(0L), "lap_text", lapText(s));
 				}
 				case RUNNING -> {
 					final String time = TimeFmt.format(this.elapsedMs(s));
 
 					if (s.deltaText.isEmpty())
-						Msg.actionBar(player, "actionbar.running", "time", time);
+						Msg.actionBar(player, "actionbar.running", "time", time, "lap_text", lapText(s), "lap", s.lap, "laps", s.heat.laps);
 					else
-						Msg.actionBar(player, "actionbar.running-delta", "time", time, "delta_text", s.deltaText);
+						Msg.actionBar(player, "actionbar.running-delta", "time", time, "delta_text", s.deltaText,
+								"lap_text", lapText(s), "lap", s.lap, "laps", s.heat.laps);
 				}
-				case FINISHED -> Msg.actionBar(player, "actionbar.finished", "time", TimeFmt.format(s.finalMs), "delta_text", s.deltaText);
+				case FINISHED -> Msg.actionBar(player, "actionbar.finished", "time", TimeFmt.format(s.finalMs), "delta_text", s.deltaText,
+						"lap_text", lapText(s), "lap", s.heat.laps, "laps", s.heat.laps);
 			}
 		}
 	}

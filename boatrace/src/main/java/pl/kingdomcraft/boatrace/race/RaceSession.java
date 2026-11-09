@@ -40,7 +40,15 @@ final class RaceSession {
 	boolean inStartZone;
 	boolean inFinishZone;
 
+	/** current lap, 1-based */
+	int lap = 1;
+	/** checkpoints per lap when the run started (an admin may add more while it is running) */
+	int cpCount;
 	int nextCheckpoint;
+	/**
+	 * Elapsed time at every checkpoint of every lap, plus every lap line except the last one (that is the finish):
+	 * lap L checkpoint i -> (L-1) * (checkpoints + 1) + i, lap line after lap L -> (L-1) * (checkpoints + 1) + checkpoints.
+	 */
 	long[] splits = new long[0];
 
 	/** personal best split times used for checkpoint deltas; null when none */
