@@ -7,6 +7,7 @@ import org.mineacademy.fo.command.SimpleCommandGroup;
 
 import pl.kingdomcraft.boatrace.arena.Arena;
 import pl.kingdomcraft.boatrace.arena.Region;
+import pl.kingdomcraft.boatrace.arena.Zone;
 import pl.kingdomcraft.boatrace.util.Msg;
 
 final class InfoSub extends RaceSubCommand {
@@ -39,6 +40,10 @@ final class InfoSub extends RaceSubCommand {
 
 	private static String describe(final Region region) {
 		return region == null ? "-" : region.describe();
+	}
+
+	private static String describe(final Zone zone) {
+		return zone == null ? "-" : zone.describe();
 	}
 
 	@Override

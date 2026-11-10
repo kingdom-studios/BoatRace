@@ -34,6 +34,7 @@ import pl.kingdomcraft.boatrace.arena.Arena;
 import pl.kingdomcraft.boatrace.arena.ArenaManager;
 import pl.kingdomcraft.boatrace.arena.Point;
 import pl.kingdomcraft.boatrace.arena.Region;
+import pl.kingdomcraft.boatrace.arena.Zone;
 import pl.kingdomcraft.boatrace.storage.RaceRecord;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
 import pl.kingdomcraft.boatrace.util.Msg;
@@ -701,8 +702,8 @@ public final class RaceManager {
 		boat.addPassenger(player);
 		player.setFireTicks(0);
 
-		final Region start = s.heat.arena.getStartLine();
-		final Region finish = s.heat.arena.getFinishLine();
+		final Zone start = s.heat.arena.getStartLine();
+		final Zone finish = s.heat.arena.getFinishLine();
 
 		s.inStartZone = start != null && start.contains(location);
 		s.inFinishZone = finish != null && finish.contains(location);
@@ -957,7 +958,7 @@ public final class RaceManager {
 
 		// a jump start is only possible once the lights sequence runs (not in an event lobby)
 		final boolean countdown = s.state == RaceSession.State.COUNTDOWN;
-		final Region start = s.heat.arena.getStartLine();
+		final Zone start = s.heat.arena.getStartLine();
 
 		if (start != null) {
 			final boolean wasIn = s.inStartZone;
@@ -1006,8 +1007,8 @@ public final class RaceManager {
 
 	private void handleRunningMove(final RaceSession s, final Player player, final Location from, final Location to) {
 		final Arena arena = s.heat.arena;
-		final Region start = arena.getStartLine();
-		final Region finish = arena.getFinishLine();
+		final Zone start = arena.getStartLine();
+		final Zone finish = arena.getFinishLine();
 
 		if (start == null || finish == null)
 			return;

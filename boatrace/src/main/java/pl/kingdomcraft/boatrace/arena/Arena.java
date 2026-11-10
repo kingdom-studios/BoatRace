@@ -39,9 +39,15 @@ public final class Arena {
 
 	/** Grid positions: index (1, 2, 3 ... unlimited) -> spawn. Solo races use the lowest index (normally #1). */
 	private final TreeMap<Integer, Point> spawns = new TreeMap<>();
-	private Region startLine;
+	/**
+	 * Segments of the start / finish line, in index order (1, 2, 3 ...). A line can be curved / slanted / arc-shaped:
+	 * entering ANY segment counts as crossing it.
+	 */
+	private final List<Region> startSegments = new ArrayList<>();
+	private final Zone startZone = new Zone(this.startSegments);
 	/** null = the start line is also the finish line (circuit) */
 	private Region finishLine;
+	private Zone finishZone;
 	private final List<Region> checkpoints = new ArrayList<>();
 	/** F1 lamps in lighting order; every lamp may consist of several blocks */
 	private final List<Region> lights = new ArrayList<>();
@@ -90,12 +96,22 @@ public final class Arena {
 	// Zones
 	// ------------------------------------------------------------------------------------------
 
-	public Region getStartLine() {
-		return this.startLine;
+	/** The start line (all segments), or null when no segment is defined. */
+	public Zone getStartLine() {
+		return this.startSegments.isEmpty() ? null : this.startZone;
 	}
 
+	/** Mutable, in index order: segment #1 is element 0. */
+	public List<Region> getStartSegments() {
+		return this.startSegments;
+	}
+
+	/** Replaces every segment with this one region (/bre setstart). */
 	public void setStartLine(final Region startLine) {
-		this.startLine = startLine;
+		this.startSegments.clear();
+
+		if (startLine != null)
+			this.startSegments.add(startLine);
 	}
 
 	/** The configured finish line, or null when the start line doubles as the finish. */
@@ -103,13 +119,14 @@ public final class Arena {
 		return this.finishLine;
 	}
 
-	/** The effective finish line (falls back to the start line on circuits). */
-	public Region getFinishLine() {
-		return this.finishLine != null ? this.finishLine : this.startLine;
+	/** The effective finish line (falls back to the - possibly multi-segment - start line on circuits). */
+	public Zone getFinishLine() {
+		return this.finishLine != null ? this.finishZone : this.getStartLine();
 	}
 
 	public void setFinishLine(final Region finishLine) {
 		this.finishLine = finishLine;
+		this.finishZone = finishLine == null ? null : Zone.of(finishLine);
 	}
 
 	public List<Region> getCheckpoints() {
@@ -157,7 +174,7 @@ public final class Arena {
 	 * The checkpoint is mandatory: without one, crossing a shared start/finish line could complete a lap instantly.
 	 */
 	public boolean isReady() {
-		return !this.spawns.isEmpty() && this.startLine != null && !this.checkpoints.isEmpty();
+		return !this.spawns.isEmpty() && !this.startSegments.isEmpty() && !this.checkpoints.isEmpty();
 	}
 
 	/** Human readable list of what is still missing, empty when ready. */
@@ -167,7 +184,7 @@ public final class Arena {
 		if (this.spawns.isEmpty())
 			missing.add("spawn");
 
-		if (this.startLine == null)
+		if (this.startSegments.isEmpty())
 			missing.add("start line");
 
 		if (this.checkpoints.isEmpty())
@@ -186,8 +203,10 @@ public final class Arena {
 		for (final Map.Entry<Integer, Point> entry : this.spawns.entrySet())
 			copy.spawns.put(entry.getKey(), entry.getValue().withWorld(world));
 
-		copy.startLine = this.startLine == null ? null : this.startLine.withWorld(world);
-		copy.finishLine = this.finishLine == null ? null : this.finishLine.withWorld(world);
+		for (final Region segment : this.startSegments)
+			copy.startSegments.add(segment.withWorld(world));
+
+		copy.setFinishLine(this.finishLine == null ? null : this.finishLine.withWorld(world));
 
 		for (final Region checkpoint : this.checkpoints)
 			copy.checkpoints.add(checkpoint.withWorld(world));

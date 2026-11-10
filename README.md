@@ -34,7 +34,9 @@ Admin (`boatrace.admin`):
 | `create <arena>` | Creates an arena. |
 | `setspawn <arena> [index]` | Grid position #index (1, 2, 3 ... unlimited, default 1) = your position + facing. Must be a few blocks **before** the start line. Solo races always start on #1, event racers get the next free position. |
 | `delspawn <arena> <index\|list>` | Removes / lists grid positions. |
-| `setstart <arena>` | Start line = current selection (also the finish line unless `setfinish` is used). |
+| `setstart <arena>` | Replaces the whole start line with the current selection (also the finish line unless `setfinish` is used). |
+| `addstart <arena>` | Adds the current selection as the next segment of the start/finish line - curved, slanted or arc-shaped lines are built from several segments; entering ANY segment counts as crossing the line. |
+| `removestart <arena> <index\|all\|list>` | Removes a start/finish line segment by index (the following ones move up), all of them, or lists them. |
 | `setfinish <arena> [clear]` | Separate finish line = current selection; `clear` = use the start line again. |
 | `addcheckpoint <arena>` | Adds the selection as the next invisible checkpoint zone (order matters). |
 | `delcheckpoint <arena> <number\|all>` | Removes checkpoints. |
@@ -54,7 +56,7 @@ An arena is ready once it has a spawn, a start line and at least one checkpoint.
 
 ### Race rules
 
-* Start, finish and checkpoints are 3D zones (cuboids). Detection is swept between ticks, so fast boats cannot skip a zone; a zone also counts up to 1.5 blocks above the selected blocks.
+* Start, finish and checkpoints are 3D zones (cuboids); the start/finish line may consist of several segments (`start-line.1`, `start-line.2` ... in arenas.yml). Detection is swept between ticks, so fast boats cannot skip a zone; a zone also counts up to 1.5 blocks above the selected blocks.
 * A lap only counts when the race was started (lights out), the racer then drove through the start line and passed **100% of the checkpoints in order**. Respawning in front of a shared start/finish line can therefore never finish a race.
 * Lamps start black, light up one by one (`lamp-on-block`) and turn black (`lamp-off-block`) at lights out - they stay black afterwards. Lamps are client-side only (the world is never modified).
 * Jumpstart (moving or driving through the start line before lights out): dynamic penalty between `jumpstart-penalty.min-seconds` (4.5s, all lamps lit) and `max-seconds` (12.5s, no lamp lit yet), linear by the number of lit lamps. RESET (or leaving the boat) starts a completely fresh attempt without the penalty.

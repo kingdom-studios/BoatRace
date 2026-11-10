@@ -245,6 +245,14 @@ arena:
   # {arena} {region}
   start-set: "&aStart line of &f{arena} &aset: &7{region}"
   start-set-circuit: "&aStart line of &f{arena} &aset: &7{region} &7(it is also the finish line - circuit)"
+  # multi-segment start / finish line. {arena} {index} {count} {region} {missing}
+  start-segment-added: "&aAdded segment &f#{index} &ato the start/finish line of &f{arena} &7({count} segment(s)): &7{region}"
+  start-segment-removed: "&aRemoved segment &f#{index} &aof the start/finish line of &f{arena}&a, &f{count} &aleft. The following ones moved up by one."
+  start-segment-out-of-range: "&cArena &f{arena} &chas start line segments 1-{count}."
+  start-segments-cleared: "&aRemoved all &f{count} &astart line segments of &f{arena}&a."
+  start-segments-none: "&cArena &f{arena} &chas no start line yet - add one with &f/bre addstart {arena}"
+  start-segments-header: "&7Start/finish line of &f{arena}&7 ({count} segment(s)):"
+  start-segments-line: " &8#{index} &7{region}"
   finish-set: "&aFinish line of &f{arena} &aset: &7{region}"
   finish-cleared: "&aArena &f{arena} &anow uses the start line as the finish line (circuit)."
   # {arena} {number} {region} {missing}

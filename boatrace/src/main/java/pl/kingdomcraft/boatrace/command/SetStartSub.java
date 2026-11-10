@@ -12,7 +12,7 @@ import pl.kingdomcraft.boatrace.arena.Region;
 final class SetStartSub extends RaceSubCommand {
 
 	SetStartSub(final SimpleCommandGroup group) {
-		super(group, "setstart|setstartline", "Set the start line to your wand selection (also the finish unless setfinish is used).", "<arena>", 1, true);
+		super(group, "setstart|setstartline", "Replace the whole start line with your wand selection (curved lines: /bre addstart). Also the finish unless setfinish is used.", "<arena>", 1, true);
 	}
 
 	@Override

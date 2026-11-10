@@ -113,7 +113,14 @@ public final class ArenaManager {
 			if (legacySpawn != null)
 				arena.getSpawns().putIfAbsent(1, legacySpawn);
 
-			arena.setStartLine(Region.load(section.getConfigurationSection("start-line"), LEGACY_RADIUS));
+			// start-line.1, start-line.2 ... = segments; older versions stored a single region directly under start-line
+			final ConfigurationSection startLine = section.getConfigurationSection("start-line");
+
+			if (startLine != null && startLine.isString("world"))
+				arena.setStartLine(Region.load(startLine, LEGACY_RADIUS));
+			else
+				arena.getStartSegments().addAll(loadList(startLine));
+
 			arena.setFinishLine(Region.load(section.getConfigurationSection("finish"), LEGACY_RADIUS));
 
 			arena.getCheckpoints().addAll(loadList(section.getConfigurationSection("checkpoints")));
@@ -174,8 +181,10 @@ public final class ArenaManager {
 			for (final Map.Entry<Integer, Point> spawn : arena.getSpawns().entrySet())
 				spawn.getValue().save(yaml.createSection(base + ".spawns." + spawn.getKey()));
 
-			if (arena.getStartLine() != null)
-				arena.getStartLine().save(yaml.createSection(base + ".start-line"));
+			int segment = 1;
+
+			for (final Region region : arena.getStartSegments())
+				region.save(yaml.createSection(base + ".start-line." + segment++));
 
 			if (arena.getFinishLineRaw() != null)
 				arena.getFinishLineRaw().save(yaml.createSection(base + ".finish"));
