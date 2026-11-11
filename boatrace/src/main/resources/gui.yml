@@ -24,6 +24,12 @@ status:
   busy: "&cBusy &7- you will be queued"
   event: "&eEvent open - join now"
   not-ready: "&7Not ready"
+  maintenance: "&cClosed - maintenance"
+
+# A map an admin closed (/bre maintenance <arena> true) stays in the menu but is disabled: clicking it only shows
+# race.maintenance (messages.yml). Its icon is replaced by this material ("" = keep the icon).
+maintenance:
+  material: BARRIER
 
 # {access} in the lore
 access:
@@ -72,6 +78,7 @@ random:
   lore:
     - "&7Pick a random map you can play."
     - "&7Maps available to you: &f{maps}"
+    - "&7(open maps with room for your whole party)"
     - "&7Players racing: &f{players}"
 
 close:

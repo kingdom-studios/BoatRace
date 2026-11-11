@@ -85,6 +85,8 @@ public final class GuiManager implements Listener {
 	private Set<String> clickDecrease = Set.of("RIGHT");
 	private Set<String> clickJoin = Set.of("SHIFT_LEFT", "SHIFT_RIGHT", "MIDDLE");
 	private final Map<RaceManager.ArenaStatus, String> statusText = new HashMap<>();
+	/** replaces the icon material of a map in maintenance; null = keep the icon */
+	private Material maintenanceMaterial = Material.BARRIER;
 	private String accessAllowed = "&aYou can play this map";
 	private String accessDenied = "&cYou need &f{permission}";
 	private final Map<String, Icon> mapIcons = new LinkedHashMap<>();
@@ -132,6 +134,12 @@ public final class GuiManager implements Listener {
 		this.statusText.put(RaceManager.ArenaStatus.BUSY, c.getString("status.busy", "&cBusy"));
 		this.statusText.put(RaceManager.ArenaStatus.EVENT, c.getString("status.event", "&eEvent - open for joining"));
 		this.statusText.put(RaceManager.ArenaStatus.NOT_READY, c.getString("status.not-ready", "&7Not ready"));
+		this.statusText.put(RaceManager.ArenaStatus.MAINTENANCE, c.getString("status.maintenance", "&cClosed - maintenance"));
+
+		final String maintenance = c.getString("maintenance.material", "BARRIER");
+		final Material maintenanceItem = maintenance == null || maintenance.isBlank() ? null : Material.matchMaterial(maintenance);
+
+		this.maintenanceMaterial = maintenanceItem != null && maintenanceItem.isItem() ? maintenanceItem : null;
 		this.accessAllowed = c.getString("access.allowed", this.accessAllowed);
 		this.accessDenied = c.getString("access.denied", this.accessDenied);
 
@@ -250,7 +258,7 @@ public final class GuiManager implements Listener {
 			final Arena arena = this.arenas.get(entry.getKey());
 
 			if (arena != null)
-				this.place(inventory, holder, entry.getValue().slots(), this.build(entry.getValue(), this.mapPlaceholders(player, arena)), new Action(Type.MAP, arena.getName()));
+				this.place(inventory, holder, entry.getValue().slots(), this.build(this.iconOf(arena, entry.getValue()), this.mapPlaceholders(player, arena)), new Action(Type.MAP, arena.getName()));
 		}
 
 		if (this.showUnlisted && this.unlisted != null) {
@@ -271,7 +279,7 @@ public final class GuiManager implements Listener {
 				if (slot >= this.size)
 					break;
 
-				this.place(inventory, holder, List.of(slot), this.build(this.unlisted, this.mapPlaceholders(player, arena)), new Action(Type.MAP, arena.getName()));
+				this.place(inventory, holder, List.of(slot), this.build(this.iconOf(arena, this.unlisted), this.mapPlaceholders(player, arena)), new Action(Type.MAP, arena.getName()));
 			}
 		}
 
@@ -287,6 +295,14 @@ public final class GuiManager implements Listener {
 				inventory.setItem(slot, item);
 				holder.actions.put(slot, action);
 			}
+	}
+
+	/** A map in maintenance is shown disabled: with the maintenance material instead of its icon. */
+	private Icon iconOf(final Arena arena, final Icon icon) {
+		if (!arena.isMaintenance() || this.maintenanceMaterial == null)
+			return icon;
+
+		return new Icon(this.maintenanceMaterial, icon.name(), icon.lore(), icon.slots());
 	}
 
 	private Object[] mapPlaceholders(final Player player, final Arena arena) {
@@ -306,9 +322,11 @@ public final class GuiManager implements Listener {
 
 	private Object[] randomPlaceholders(final Player player) {
 		int maps = 0;
+		final int size = this.races.groupSize(player);
 
+		// the maps the random button can really pick: open, permitted, with a grid position for the whole party
 		for (final Arena arena : this.arenas.readyArenas())
-			if (player.hasPermission(permission(arena)))
+			if (!arena.isMaintenance() && arena.getSpawns().size() >= size && player.hasPermission(permission(arena)))
 				maps++;
 
 		return new Object[] { "maps", maps, "players", this.races.playingCount() };
@@ -396,6 +414,12 @@ public final class GuiManager implements Listener {
 			return;
 		}
 
+		// closed maps are disabled: no joining and no lap changes
+		if (arena.isMaintenance()) {
+			Msg.send(player, "race.maintenance", "arena", arena.getName());
+			return;
+		}
+
 		if (this.clickJoin.contains(click))
 			this.joinFromMenu(player, arena, this.lapsOf(player, arena));
 
@@ -407,10 +431,15 @@ public final class GuiManager implements Listener {
 	}
 
 	private void clickRandom(final Player player) {
-		final Arena arena = this.races.pickRandomReadyArena(candidate -> player.hasPermission(permission(candidate)));
+		// open maps only, and - for a party leader - only maps with a grid position for every member
+		final Arena arena = this.races.pickRandomReadyArena(player, candidate -> player.hasPermission(permission(candidate)));
 
 		if (arena == null) {
-			Msg.send(player, "gui.no-random");
+			if (this.races.groupSize(player) > 1)
+				Msg.send(player, "party.no-map-fits", "size", this.races.groupSize(player));
+			else
+				Msg.send(player, "gui.no-random");
+
 			return;
 		}
 

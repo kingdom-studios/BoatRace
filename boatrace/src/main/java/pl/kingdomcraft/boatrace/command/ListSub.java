@@ -18,7 +18,7 @@ final class ListSub extends RaceSubCommand {
 		this.info("arena.list-header");
 
 		for (final Arena arena : this.plugin().getArenas().all())
-			this.info(arena.isReady() ? "arena.list-ready" : "arena.list-not-ready",
+			this.info(!arena.isReady() ? "arena.list-not-ready" : arena.isMaintenance() ? "arena.list-maintenance" : "arena.list-ready",
 					"arena", arena.getName(), "checkpoints", arena.getCheckpoints().size(), "missing", arena.missing());
 	}
 

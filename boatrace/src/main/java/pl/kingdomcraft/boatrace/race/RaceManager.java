@@ -1,6 +1,7 @@
 package pl.kingdomcraft.boatrace.race;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -64,11 +65,15 @@ import pl.kingdomcraft.boatrace.util.TimeFmt;
  */
 public final class RaceManager {
 
+	private static final String ADMIN_PERMISSION = "boatrace.admin";
+
 	/** Outcome of {@link #join(Player, Arena)}; the racer has already been told about failures. */
 	public enum JoinResult {
 		JOINED,
 		BANNED,
 		NOT_READY,
+		/** the arena is closed for players (/bre maintenance) */
+		MAINTENANCE,
 		/** the arena, all its copies (and - if enabled - every other arena) are occupied and queueing is off */
 		BUSY,
 		/** the arena is occupied: the player / party waits in the queue of the arena */
@@ -86,6 +91,8 @@ public final class RaceManager {
 		BUSY,
 		/** an event lobby with free grid positions is open */
 		EVENT,
+		/** closed for players (/bre maintenance) */
+		MAINTENANCE,
 		NOT_READY
 	}
 
@@ -221,13 +228,13 @@ public final class RaceManager {
 		return this.pickRandomReadyArena(arena -> true);
 	}
 
-	/** Same, but only among the arenas the filter accepts (e.g. the ones a player has the permission for). */
+	/** Same, but only among the open arenas the filter accepts (arenas in maintenance are never picked). */
 	public Arena pickRandomReadyArena(final Predicate<Arena> filter) {
 		final List<Arena> ready = new ArrayList<>();
 		final List<Arena> free = new ArrayList<>();
 
 		for (final Arena arena : this.arenas.readyArenas())
-			if (filter.test(arena)) {
+			if (!arena.isMaintenance() && filter.test(arena)) {
 				ready.add(arena);
 
 				if (this.freeInstanceWorld(arena, null) != null)
@@ -237,6 +244,21 @@ public final class RaceManager {
 		final List<Arena> pool = free.isEmpty() ? ready : free;
 
 		return pool.isEmpty() ? null : pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
+	}
+
+	/**
+	 * A random arena for this player: open, accepted by the filter and - when a party leader joins - with at least one
+	 * grid position for every party member (smaller arenas are excluded completely).
+	 */
+	public Arena pickRandomReadyArena(final Player player, final Predicate<Arena> filter) {
+		final int size = this.groupSize(player);
+
+		return this.pickRandomReadyArena(arena -> arena.getSpawns().size() >= size && filter.test(arena));
+	}
+
+	/** How many players start when this player joins a map: the whole party for its leader, otherwise 1. */
+	public int groupSize(final Player player) {
+		return this.parties.groupOf(player).size();
 	}
 
 	public JoinResult join(final Player player, final Arena arena) {
@@ -290,6 +312,12 @@ public final class RaceManager {
 			return JoinResult.NOT_READY;
 		}
 
+		// closed by an admin: only admins may still go there (testing)
+		if (arena.isMaintenance() && !leader.hasPermission(ADMIN_PERMISSION)) {
+			Msg.send(leader, "race.maintenance", "arena", arena.getName());
+			return JoinResult.MAINTENANCE;
+		}
+
 		if (group) {
 			// the leader may switch maps, the others must not be in a race
 			for (final Player member : players.subList(1, players.size()))
@@ -334,7 +362,7 @@ public final class RaceManager {
 			final List<Arena> candidates = new ArrayList<>();
 
 			for (final Arena other : this.arenas.readyArenas())
-				if (other != arena && other.getSpawns().size() >= players.size() && this.freeInstanceWorld(other, existing) != null)
+				if (other != arena && !other.isMaintenance() && other.getSpawns().size() >= players.size() && this.freeInstanceWorld(other, existing) != null)
 					candidates.add(other);
 
 			if (!candidates.isEmpty()) {
@@ -535,7 +563,7 @@ public final class RaceManager {
 						continue;
 					}
 
-					if (arena == null || !arena.isReady()) {
+					if (arena == null || !arena.isReady() || arena.isMaintenance()) {
 						this.dequeue(entry.owner);
 						Msg.send(owner, "queue.cancelled", "arena", arena == null ? key : arena.getName());
 						continue;
@@ -608,6 +636,9 @@ public final class RaceManager {
 	public ArenaStatus statusOf(final Arena arena) {
 		if (!arena.isReady())
 			return ArenaStatus.NOT_READY;
+
+		if (arena.isMaintenance())
+			return ArenaStatus.MAINTENANCE;
 
 		final Heat lobby = this.findEvent(arena);
 
@@ -928,6 +959,10 @@ public final class RaceManager {
 		// An empty event lobby stays open; everything else is freed
 		if (heat.slots.isEmpty() && !(heat.event && heat.phase == Heat.Phase.LOBBY) && this.heats.get(heat.key) == heat)
 			this.releaseHeat(heat);
+
+		// a party member who left must not keep the rest of the party waiting at the finish
+		else if (heat.privateHeat)
+			this.checkPartyComplete(heat);
 	}
 
 	/** Frees the arena instance of the heat; waiting players / parties may take it. */
@@ -1009,9 +1044,11 @@ public final class RaceManager {
 		s.offTrack = false;
 		s.offTrackTicks = 0;
 
-		final RaceRecord best = this.storage.getRecord(s.heat.arena.getName(), s.heat.laps, s.playerId);
+		// The personal best exists for the standard single-lap race only. A multi-lap total is never compared with it,
+		// and its checkpoint times only serve as the reference of the FIRST lap (see recordSplit).
+		final RaceRecord best = this.storage.getRecord(s.heat.arena.getName(), s.playerId);
 
-		s.bestTotalMs = best == null ? -1L : best.getBestMs();
+		s.bestTotalMs = best == null || s.heat.laps > 1 ? -1L : best.getBestMs();
 		s.referenceSplits = best == null || best.getSplits().length == 0 ? null : best.getSplits();
 	}
 
@@ -1470,6 +1507,9 @@ public final class RaceManager {
 		s.lap++;
 		s.nextCheckpoint = 0;
 
+		// from the second lap on there is no delta - it is neither calculated nor shown any more
+		s.deltaText = "";
+
 		Msg.title(player, s.lap == s.heat.laps ? "final-lap" : "new-lap", "lap", s.lap, "laps", s.heat.laps);
 		this.settings.soundLap.play(player);
 	}
@@ -1483,7 +1523,8 @@ public final class RaceManager {
 
 		s.splits[splitIndex] = elapsed;
 
-		if (s.referenceSplits != null && splitIndex < s.referenceSplits.length && s.referenceSplits[splitIndex] > 0L)
+		// the delta to the personal best exists in the first lap only
+		if (s.lap == 1 && s.referenceSplits != null && splitIndex < s.referenceSplits.length && s.referenceSplits[splitIndex] > 0L)
 			s.deltaText = deltaText(elapsed - s.referenceSplits[splitIndex]);
 	}
 
@@ -1498,16 +1539,21 @@ public final class RaceManager {
 
 		final Heat heat = s.heat;
 		final String arena = heat.arena.getName();
-		final long previousBest = s.bestTotalMs;
+		final long previousBest = s.bestTotalMs; // -1 in multi-lap races: there is no personal best to compare with
 		final boolean blacklisted = this.storage.isBlacklisted(s.playerId);
-		final boolean newBest = this.storage.submitRun(arena, heat.laps, s.playerId, player.getName(), s.finalMs, s.penaltyMs, s.splits.clone());
-		final boolean rewarded = !blacklisted && this.giveReward(s, player);
 		final int position = heat.event ? ++heat.finishedCount : 0;
+		final boolean newBest = this.storage.submitRun(arena, heat.laps, s.playerId, player.getName(), s.finalMs, s.penaltyMs, s.splits.clone(), position, heat.fieldSize);
+		final boolean rewarded = !blacklisted && this.giveReward(s, player);
+
+		heat.results.add(new Heat.Result(s.playerId, player.getName(), s.finalMs, s.penaltyMs));
 
 		final String summary;
 
 		if (blacklisted)
 			summary = "finish.banned";
+
+		else if (heat.laps > 1)
+			summary = "finish.multi-lap";
 
 		else if (newBest)
 			summary = previousBest > 0L ? "finish.new-best" : "finish.first";
@@ -1517,7 +1563,7 @@ public final class RaceManager {
 
 		final long deltaMs = previousBest > 0L ? s.finalMs - previousBest : 0L;
 
-		// The only chat message of a whole race
+		// The result of the player (a party gets the leaderboard when everybody is done)
 		Msg.raw(player, summary,
 				"player", player.getName(),
 				"arena", arena,
@@ -1525,23 +1571,97 @@ public final class RaceManager {
 				"penalty_note", s.penaltyMs > 0L ? Msg.text("finish.penalty-note", "penalty", TimeFmt.delta(s.penaltyMs)) : "",
 				"best", previousBest > 0L ? TimeFmt.format(previousBest) : "-",
 				"delta", TimeFmt.delta(deltaMs),
-				"rank", Math.max(0, this.storage.getRank(arena, heat.laps, s.playerId)),
+				"rank", Math.max(0, this.storage.getRank(arena, s.playerId)),
 				"laps", heat.laps,
 				"laps_note", heat.laps > 1 ? Msg.text("finish.laps-note", "laps", heat.laps) : "",
 				"reward_note", rewarded ? Msg.text("finish.reward-note", "arena", arena) : "",
 				"event_note", heat.event ? Msg.text("finish.event-note", "position", position, "racers", heat.fieldSize) : "");
 
-		// Shown on the action bar during the pause before the teleport
+		// Shown on the action bar while waiting for the teleport
 		s.deltaText = previousBest > 0L ? deltaText(deltaMs) : "";
 
 		Msg.title(player, "finish", "time", TimeFmt.format(s.finalMs), "arena", arena, "laps", heat.laps);
 		this.settings.soundFinish.play(player);
 
-		// Short pause with the result on screen, then back to the hub (the boat is removed on dispose)
-		this.later(s, this.settings.finishDelayTicks, () -> {
-			if (!s.disposed && s.state == RaceSession.State.FINISHED && this.sessions.get(s.playerId) == s)
-				this.dispose(s, LeaveMode.HUB);
-		});
+		if (heat.privateHeat)
+			// a party member stays on the map (free to move around) until the whole party has finished
+			this.checkPartyComplete(heat);
+
+		else
+			// Short pause with the result on screen, then back to the hub (the boat is removed on dispose)
+			this.later(s, this.settings.finishDelayTicks, () -> {
+				if (!s.disposed && s.state == RaceSession.State.FINISHED && this.sessions.get(s.playerId) == s)
+					this.dispose(s, LeaveMode.HUB);
+			});
+	}
+
+	/**
+	 * Party heats: once EVERY remaining racer has finished, the party leaderboard goes to all of them and - after the
+	 * usual pause - they are all sent to the hub at the same moment. Racers who left meanwhile do not hold anybody up.
+	 */
+	private void checkPartyComplete(final Heat heat) {
+		if (!heat.privateHeat || heat.partyDone)
+			return;
+
+		final List<RaceSession> racers = heat.racers();
+
+		if (racers.isEmpty())
+			return;
+
+		for (final RaceSession racer : racers)
+			if (racer.state != RaceSession.State.FINISHED)
+				return;
+
+		heat.partyDone = true;
+
+		this.sendPartyLeaderboard(heat, racers);
+
+		for (final RaceSession racer : racers)
+			this.later(racer, this.settings.finishDelayTicks, () -> {
+				if (!racer.disposed && racer.state == RaceSession.State.FINISHED && this.sessions.get(racer.playerId) == racer)
+					this.dispose(racer, LeaveMode.HUB);
+			});
+	}
+
+	/** Everybody who finished, fastest first (penalties included), as chat lines to every remaining party member. */
+	private void sendPartyLeaderboard(final Heat heat, final List<RaceSession> recipients) {
+		final List<Heat.Result> ranking = new ArrayList<>(heat.results);
+
+		ranking.sort(Comparator.comparingLong(Heat.Result::totalMs));
+
+		final String arena = heat.arena.getName();
+		final String lapsNote = heat.laps > 1 ? Msg.text("finish.laps-note", "laps", heat.laps) : "";
+
+		for (final RaceSession recipient : recipients) {
+			final Player player = Bukkit.getPlayer(recipient.playerId);
+
+			if (player == null)
+				continue;
+
+			Msg.raw(player, "finish.party-header", "arena", arena, "laps", heat.laps, "laps_note", lapsNote, "players", ranking.size());
+
+			int place = 1;
+
+			for (final Heat.Result result : ranking)
+				Msg.raw(player, "finish.party-line",
+						"position", place++,
+						"player", result.name(),
+						"time", TimeFmt.format(result.totalMs()),
+						"penalty_note", result.penaltyMs() > 0L ? Msg.text("finish.penalty-note", "penalty", TimeFmt.delta(result.penaltyMs())) : "",
+						"you", result.uuid().equals(recipient.playerId) ? Msg.text("finish.party-you") : "");
+
+			Msg.raw(player, "finish.party-footer", "arena", arena, "laps", heat.laps, "players", ranking.size());
+		}
+	}
+
+	private static int finishedCount(final Heat heat) {
+		int done = 0;
+
+		for (final RaceSession racer : heat.racers())
+			if (racer.state == RaceSession.State.FINISHED)
+				done++;
+
+		return done;
 	}
 
 	/** "(+1.23s)" / "(-0.45s)" as configured in messages.yml. */
@@ -1843,8 +1963,15 @@ public final class RaceManager {
 						Msg.actionBar(player, "actionbar.running-delta", "time", time, "delta_text", s.deltaText,
 								"lap_text", lapText(s), "lap", s.lap, "laps", s.heat.laps);
 				}
-				case FINISHED -> Msg.actionBar(player, "actionbar.finished", "time", TimeFmt.format(s.finalMs), "delta_text", s.deltaText,
-						"lap_text", lapText(s), "lap", s.heat.laps, "laps", s.heat.laps);
+				case FINISHED -> {
+					if (s.heat.privateHeat && !s.heat.partyDone)
+						Msg.actionBar(player, "actionbar.finished-party", "time", TimeFmt.format(s.finalMs), "delta_text", s.deltaText,
+								"lap_text", lapText(s), "lap", s.heat.laps, "laps", s.heat.laps,
+								"done", finishedCount(s.heat), "total", s.heat.slots.size());
+					else
+						Msg.actionBar(player, "actionbar.finished", "time", TimeFmt.format(s.finalMs), "delta_text", s.deltaText,
+								"lap_text", lapText(s), "lap", s.heat.laps, "laps", s.heat.laps);
+				}
 			}
 		}
 	}

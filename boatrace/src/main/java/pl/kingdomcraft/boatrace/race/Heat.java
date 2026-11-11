@@ -58,6 +58,15 @@ final class Heat {
 	/** laps of this race (arena setting, or the override given when the event was opened / started) */
 	int laps;
 
+	/** a finished racer of a party heat: the party leaderboard is built from these */
+	record Result(java.util.UUID uuid, String name, long totalMs, long penaltyMs) {
+	}
+
+	/** finish results in finishing order (party heats) */
+	final List<Result> results = new ArrayList<>();
+	/** every party member has finished: the leaderboard was sent and the teleport countdown runs */
+	boolean partyDone;
+
 	/** how many racers of an event crossed the finish line (for the finishing position) */
 	int finishedCount;
 	/** number of racers when the lights went out */

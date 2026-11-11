@@ -22,7 +22,8 @@ final class InfoSub extends RaceSubCommand {
 
 		this.info("arena.info",
 				"arena", arena.getName(),
-				"status", arena.isReady() ? Msg.text("arena.info-ready") : Msg.text("arena.info-not-ready", "missing", arena.missing()),
+				"status", !arena.isReady() ? Msg.text("arena.info-not-ready", "missing", arena.missing())
+						: arena.isMaintenance() ? Msg.text("arena.info-maintenance") : Msg.text("arena.info-ready"),
 				"spawn", DelSpawnSub.spawnList(arena),
 				"start", describe(arena.getStartLine()),
 				"finish", arena.getFinishLineRaw() == null ? Msg.text("arena.info-same-as-start") : describe(arena.getFinishLineRaw()),

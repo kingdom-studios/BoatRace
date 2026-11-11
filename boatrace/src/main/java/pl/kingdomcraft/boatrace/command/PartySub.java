@@ -16,7 +16,7 @@ final class PartySub extends RaceSubCommand {
 	enum Action {
 		CREATE("create", "Create a party (you become the leader).", null, 0),
 		INVITE("invite", "Invite a player to your party (leader).", "<player>", 1),
-		JOIN("join", "Join the party of the player who invited you.", "<player>", 1),
+		JOIN("join", "Join the party that invited you (name the leader only when several did).", "[player]", 0),
 		LEAVE("leave", "Leave the party (the leader disbands it).", null, 0),
 		LIST("list", "List the party members.", null, 0),
 		KICK("kick", "Kick a player from your party (leader).", "<player>", 1),
@@ -51,7 +51,7 @@ final class PartySub extends RaceSubCommand {
 		switch (this.action) {
 			case CREATE -> parties.create(player);
 			case INVITE -> parties.invite(player, this.args[0]);
-			case JOIN -> parties.join(player, this.args[0]);
+			case JOIN -> parties.join(player, this.args.length > 0 ? this.args[0] : null);
 			case LEAVE -> parties.leave(player);
 			case LIST -> parties.list(player);
 			case KICK -> parties.kick(player, this.args[0]);
@@ -82,8 +82,11 @@ final class PartySub extends RaceSubCommand {
 			return new ArrayList<>();
 
 		switch (this.action) {
-			case INVITE, JOIN:
+			case INVITE:
 				return this.completeLastWordPlayerNames();
+
+			case JOIN:
+				return this.completeLastWord(this.plugin().getParties().invitersOf(player.getUniqueId()));
 
 			case KICK: {
 				final Party party = this.plugin().getParties().get(player.getUniqueId());

@@ -35,9 +35,11 @@ import com.zaxxer.hikari.HikariDataSource;
  * Shared MariaDB storage (the same database the proxy uses), pooled with HikariCP.
  *
  * Tables (prefix "boatrace_"):
- *  - records    best time per (arena, laps, player) incl. splits and the server it was driven on (server_name);
- *               a 3-lap race has its own leaderboard, separate from the 1-lap one
- *  - runs       every finished race (history for the web panel), with server_name / server_group
+ *  - records    personal best per (arena, player) of the standard SINGLE-lap race incl. splits and the server it was
+ *               driven on (server_name). Multi-lap races never touch it.
+ *  - runs       every finished single-lap race (history for the web panel), with server_name / server_group
+ *  - event_results  the total time of every finished MULTI-lap race (laps > 1): laps, total, penalty, finishing
+ *               position / field size of events, server_name / server_group - the table for event leaderboards
  *  - blacklist  banned players (network wide)
  *  - rewards    one-time rewards already claimed
  *
@@ -54,6 +56,10 @@ public final class RecordStorage {
 
 	private static final String RECORDS = "boatrace_records";
 	private static final String RUNS = "boatrace_runs";
+	private static final String EVENT_RESULTS = "boatrace_event_results";
+
+	/** Personal bests exist only for the standard single-lap race. */
+	private static final int PB_LAPS = 1;
 	private static final String BLACKLIST = "boatrace_blacklist";
 	private static final String REWARDS = "boatrace_rewards";
 
@@ -124,6 +130,14 @@ public final class RecordStorage {
 					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
 			st.execute("ALTER TABLE " + RUNS + " ADD COLUMN IF NOT EXISTS laps INT NOT NULL DEFAULT 1 AFTER uuid");
+
+			st.execute("CREATE TABLE IF NOT EXISTS " + EVENT_RESULTS + " ("
+					+ "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, arena VARCHAR(64) NOT NULL, laps INT NOT NULL, uuid CHAR(36) NOT NULL, "
+					+ "name VARCHAR(32) NOT NULL, total_ms BIGINT NOT NULL, penalty_ms BIGINT NOT NULL DEFAULT 0, splits TEXT NOT NULL, "
+					+ "finish_position INT NOT NULL DEFAULT 0, field_size INT NOT NULL DEFAULT 1, server_name VARCHAR(64) NOT NULL DEFAULT '', "
+					+ "server_group VARCHAR(64) NOT NULL DEFAULT '', finished_at BIGINT NOT NULL, "
+					+ "KEY idx_event_arena_total (arena, laps, total_ms), KEY idx_event_uuid (uuid), KEY idx_event_server (server_name)"
+					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
 			st.execute("CREATE TABLE IF NOT EXISTS " + BLACKLIST + " ("
 					+ "uuid CHAR(36) NOT NULL PRIMARY KEY, name VARCHAR(32) NOT NULL, server_name VARCHAR(64) NOT NULL DEFAULT '', created BIGINT NOT NULL"
@@ -378,15 +392,16 @@ public final class RecordStorage {
 	// Records
 	// ------------------------------------------------------------------------------------------
 
-	public synchronized RaceRecord getRecord(final String arena, final int laps, final UUID uuid) {
-		final Map<UUID, RaceRecord> map = this.records.get(boardKey(arena, laps));
+	/** The player's personal best (single-lap race). */
+	public synchronized RaceRecord getRecord(final String arena, final UUID uuid) {
+		final Map<UUID, RaceRecord> map = this.records.get(boardKey(arena, PB_LAPS));
 
 		return map == null ? null : map.get(uuid);
 	}
 
 	/** Sorted (fastest first) ranking without blacklisted players. The returned list is a read-only snapshot. */
-	public synchronized List<RaceRecord> getTop(final String arena, final int laps) {
-		final String arenaKey = boardKey(arena, laps);
+	public synchronized List<RaceRecord> getTop(final String arena) {
+		final String arenaKey = boardKey(arena, PB_LAPS);
 		List<RaceRecord> cached = this.rankingCache.get(arenaKey);
 
 		if (cached == null) {
@@ -408,8 +423,8 @@ public final class RecordStorage {
 	}
 
 	/** @return 1-based position or -1 when the player is not ranked */
-	public synchronized int getRank(final String arena, final int laps, final UUID uuid) {
-		final List<RaceRecord> top = this.getTop(arena, laps);
+	public synchronized int getRank(final String arena, final UUID uuid) {
+		final List<RaceRecord> top = this.getTop(arena);
 
 		for (int i = 0; i < top.size(); i++)
 			if (top.get(i).getUuid().equals(uuid))
@@ -419,23 +434,55 @@ public final class RecordStorage {
 	}
 
 	/**
-	 * Saves the run if it is faster than the stored best (or there is none). Every finished run (banned players
-	 * excluded) is also written to the runs history.
+	 * Stores a finished race.
 	 *
-	 * @return true when it became the new personal best
+	 * Single-lap race (laps = 1): saved as the personal best if it is faster than the stored one (or there is none),
+	 * and written to the runs history.
+	 * Multi-lap race (laps &gt; 1): only the TOTAL time is written, to the event results table - never a personal best,
+	 * never the runs history.
+	 * Banned players are not stored at all.
+	 *
+	 * @param finishPosition position in the event / party (0 = solo race)
+	 * @param fieldSize      racers that started together (1 = solo race)
+	 * @return true when it became a new personal best (always false for multi-lap races)
 	 */
-	public synchronized boolean submitRun(final String arena, final int laps, final UUID uuid, final String name, final long timeMs, final long penaltyMs, final long[] splits) {
+	public synchronized boolean submitRun(final String arena, final int laps, final UUID uuid, final String name, final long timeMs, final long penaltyMs,
+			final long[] splits, final int finishPosition, final int fieldSize) {
 		if (this.blacklist.contains(uuid))
 			return false;
 
 		final String arenaKey = key(arena);
-		final String board = boardKey(arena, laps);
-		final RaceRecord old = this.getRecord(arena, laps, uuid);
-		final boolean newBest = old == null || timeMs < old.getBestMs();
 		final String joinedSplits = joinSplits(splits);
 		final long now = System.currentTimeMillis();
 		final String server = this.serverName;
 		final String group = this.serverGroup;
+
+		if (laps > PB_LAPS) {
+			this.async(connection -> {
+				try (PreparedStatement ps = connection.prepareStatement("INSERT INTO " + EVENT_RESULTS
+						+ " (arena, laps, uuid, name, total_ms, penalty_ms, splits, finish_position, field_size, server_name, server_group, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+					ps.setString(1, arenaKey);
+					ps.setInt(2, laps);
+					ps.setString(3, uuid.toString());
+					ps.setString(4, name);
+					ps.setLong(5, timeMs);
+					ps.setLong(6, penaltyMs);
+					ps.setString(7, joinedSplits);
+					ps.setInt(8, finishPosition);
+					ps.setInt(9, fieldSize);
+					ps.setString(10, server);
+					ps.setString(11, group);
+					ps.setLong(12, now);
+					ps.executeUpdate();
+				}
+			});
+
+			return false;
+		}
+
+		final String board = boardKey(arena, PB_LAPS);
+		final RaceRecord old = this.getRecord(arena, uuid);
+		final boolean newBest = old == null || timeMs < old.getBestMs();
 
 		if (newBest) {
 			this.records.computeIfAbsent(board, k -> new HashMap<>()).put(uuid, new RaceRecord(uuid, name, timeMs, splits, server));
@@ -445,7 +492,7 @@ public final class RecordStorage {
 		this.async(connection -> {
 			try (PreparedStatement ps = connection.prepareStatement(upsertBestSql())) {
 				ps.setString(1, arenaKey);
-				ps.setInt(2, laps);
+				ps.setInt(2, PB_LAPS);
 				ps.setString(3, uuid.toString());
 				ps.setString(4, name);
 				ps.setLong(5, timeMs);
@@ -459,7 +506,7 @@ public final class RecordStorage {
 					+ " (arena, uuid, laps, name, time_ms, penalty_ms, splits, personal_best, server_name, server_group, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
 				ps.setString(1, arenaKey);
 				ps.setString(2, uuid.toString());
-				ps.setInt(3, laps);
+				ps.setInt(3, PB_LAPS);
 				ps.setString(4, name);
 				ps.setLong(5, timeMs);
 				ps.setLong(6, penaltyMs);

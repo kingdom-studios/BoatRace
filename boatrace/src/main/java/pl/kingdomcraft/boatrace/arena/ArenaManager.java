@@ -136,6 +136,7 @@ public final class ArenaManager {
 			}
 
 			arena.setLaps(section.getInt("laps", 1));
+			arena.setMaintenance(section.getBoolean("maintenance", false));
 			arena.setRewardMode(Arena.RewardMode.parse(section.getString("reward.mode", "NONE")));
 			arena.getRewardCommands().addAll(section.getStringList("reward.commands"));
 
@@ -207,6 +208,7 @@ public final class ArenaManager {
 			yaml.set(base + ".track-blocks", trackBlocks);
 
 			yaml.set(base + ".laps", arena.getLaps());
+			yaml.set(base + ".maintenance", arena.isMaintenance());
 			yaml.set(base + ".reward.mode", arena.getRewardMode().name());
 			yaml.set(base + ".reward.commands", new ArrayList<>(arena.getRewardCommands()));
 		}

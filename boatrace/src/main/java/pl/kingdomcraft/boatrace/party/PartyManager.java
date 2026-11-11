@@ -78,15 +78,26 @@ public final class PartyManager implements Listener {
 			return;
 		}
 
-		this.byMember.put(player.getUniqueId(), new Party(player.getUniqueId(), this.settings.partyDefaultLimit));
+		this.open(player);
 		Msg.send(player, "party.created", "limit", this.settings.partyDefaultLimit);
 	}
 
-	public void invite(final Player leader, final String targetName) {
-		final Party party = this.requireLeader(leader);
+	private Party open(final Player leader) {
+		final Party party = new Party(leader.getUniqueId(), this.settings.partyDefaultLimit);
 
-		if (party == null)
+		this.byMember.put(leader.getUniqueId(), party);
+
+		return party;
+	}
+
+	/** Inviting without a party creates one (the inviter becomes its leader) - but only for a valid invitation. */
+	public void invite(final Player leader, final String targetName) {
+		Party party = this.byMember.get(leader.getUniqueId());
+
+		if (party != null && !party.isLeader(leader.getUniqueId())) {
+			Msg.send(leader, "party.not-leader");
 			return;
+		}
 
 		final Player target = Bukkit.getPlayerExact(targetName);
 
@@ -105,6 +116,11 @@ public final class PartyManager implements Listener {
 			return;
 		}
 
+		if (party == null) {
+			party = this.open(leader);
+			Msg.send(leader, "party.created-by-invite", "limit", this.settings.partyDefaultLimit);
+		}
+
 		if (party.isFull()) {
 			Msg.send(leader, "party.full", "limit", party.getLimit());
 			return;
@@ -116,19 +132,63 @@ public final class PartyManager implements Listener {
 		Msg.send(target, "party.invited", "leader", leader.getName(), "seconds", this.settings.partyInviteSeconds);
 	}
 
-	/** /party join <inviter> */
+	/** The parties (distinct) that currently have a valid invitation for the player. */
+	private List<Party> invitingParties(final UUID invited) {
+		final List<Party> result = new ArrayList<>();
+
+		for (final Party party : new java.util.LinkedHashSet<>(this.byMember.values()))
+			if (party.hasInvite(invited))
+				result.add(party);
+
+		return result;
+	}
+
+	/** Names of the leaders who invited the player (tab completion). */
+	public List<String> invitersOf(final UUID invited) {
+		final List<String> names = new ArrayList<>();
+
+		for (final Party party : this.invitingParties(invited))
+			names.add(this.nameOf(party.getLeader()));
+
+		return names;
+	}
+
+	/**
+	 * /party join [inviter]. Without a name the player joins the party that invited them - as long as there is only
+	 * one such invitation; with several, they have to name the leader.
+	 */
 	public void join(final Player player, final String inviterName) {
 		if (this.byMember.containsKey(player.getUniqueId())) {
 			Msg.send(player, "party.already-in");
 			return;
 		}
 
-		final Player inviter = Bukkit.getPlayerExact(inviterName);
-		final Party party = inviter == null ? null : this.byMember.get(inviter.getUniqueId());
+		final Party party;
 
-		if (party == null || !party.hasInvite(player.getUniqueId())) {
-			Msg.send(player, "party.no-invite", "player", inviterName);
-			return;
+		if (inviterName == null) {
+			final List<Party> invitations = this.invitingParties(player.getUniqueId());
+
+			if (invitations.isEmpty()) {
+				Msg.send(player, "party.no-invites");
+				return;
+			}
+
+			if (invitations.size() > 1) {
+				Msg.send(player, "party.multiple-invites", "leaders", String.join(", ", this.invitersOf(player.getUniqueId())));
+				return;
+			}
+
+			party = invitations.get(0);
+
+		} else {
+			final Player inviter = Bukkit.getPlayerExact(inviterName);
+
+			party = inviter == null ? null : this.byMember.get(inviter.getUniqueId());
+
+			if (party == null || !party.hasInvite(player.getUniqueId())) {
+				Msg.send(player, "party.no-invite", "player", inviterName);
+				return;
+			}
 		}
 
 		if (party.isFull()) {

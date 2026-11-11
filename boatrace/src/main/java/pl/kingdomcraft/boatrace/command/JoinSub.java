@@ -53,10 +53,17 @@ final class JoinSub extends RaceSubCommand {
 		final boolean checkPermission = this.plugin().getSettings().enforceMapPermissionOnCommand && this.getSender() == target;
 
 		if (this.args.length == 0 || "random".equalsIgnoreCase(this.args[0])) {
-			arena = this.plugin().getRaces().pickRandomReadyArena(candidate -> !checkPermission || target.hasPermission(GuiManager.permission(candidate)));
+			// open arenas only; a party leader gets only arenas with a grid position for every member
+			arena = this.plugin().getRaces().pickRandomReadyArena(target, candidate -> !checkPermission || target.hasPermission(GuiManager.permission(candidate)));
 
-			if (arena == null)
-				this.fail("command.no-ready-arena");
+			if (arena == null) {
+				if (this.plugin().getRaces().groupSize(target) > 1)
+					this.fail("party.no-map-fits", "size", this.plugin().getRaces().groupSize(target));
+				else
+					this.fail("command.no-ready-arena");
+
+				return;
+			}
 
 		} else {
 			arena = this.requireArena(0);
@@ -72,6 +79,7 @@ final class JoinSub extends RaceSubCommand {
 			switch (result) {
 				case BANNED -> this.info("race.banned");
 				case NOT_READY -> this.info("race.not-ready", "arena", arena.getName(), "missing", arena.missing());
+				case MAINTENANCE -> this.info("race.maintenance", "arena", arena.getName());
 				case BUSY -> this.info("race.all-busy", "arena", arena.getName());
 				case QUEUED, PARTY_BLOCKED -> {
 					// the players concerned were already told (queue position / which party member is busy)

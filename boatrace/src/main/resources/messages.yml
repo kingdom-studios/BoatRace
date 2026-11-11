@@ -21,8 +21,11 @@ actionbar:
   countdown-penalty: "{lap_text}&eTime: &f{time} &c(+{penalty}s penalty)"
   # While racing, before the first checkpoint (or when there is no personal best). {time}
   running: "{lap_text}&eTime: &f{time}"
-  # While racing, after a checkpoint (or lap line) - the delta stays until the next one. {time} {delta_text} {lap} {laps} {lap_text}
+  # While racing, after a checkpoint of the FIRST lap - the delta (to the single-lap personal best) stays until the next checkpoint.
+  # From the second lap on there is no delta, the plain "running" line is used. {time} {delta_text} {lap} {laps} {lap_text}
   running-delta: "{lap_text}&eTime: &f{time} {delta_text}"
+  # A party member who finished, waiting for the rest of the party. {time} {delta_text} {done} {total}
+  finished-party: "{lap_text}&a&lFINISH &8| &eTime: &f{time} {delta_text} &8| &7Waiting for the party &f({done}/{total})"
   # During the short pause after the finish. {time} {delta_text} (delta_text is empty without a previous best)
   finished: "{lap_text}&a&lFINISH &8| &eTime: &f{time} {delta_text}"
 
@@ -119,6 +122,14 @@ finish:
     - "{reward_note}"
     - "{event_note}"
     - "&8&m                                                  "
+  # a multi-lap race (laps > 1): only the total time - no personal best, no ranking
+  multi-lap:
+    - "&8&m                                                  "
+    - "  &a&lFINISH! &7Arena &f{arena}"
+    - "  &7Total time: &f&l{time}{laps_note}{penalty_note}"
+    - "{reward_note}"
+    - "{event_note}"
+    - "&8&m                                                  "
   # beat the previous personal best
   new-best:
     - "&8&m                                                  "
@@ -143,6 +154,14 @@ finish:
     - "  &a&lFINISH! &7Time: &f&l{time}{laps_note}{penalty_note}"
     - "  &cYou are banned - your time was not saved."
     - "&8&m                                                  "
+  # Party leaderboard - sent to every party member when the LAST member has finished (fastest first, penalties included)
+  # header: {arena} {laps} {laps_note} {players}
+  party-header: "&8&m                                                  "
+  # line: {position} {player} {time} {penalty_note} {you}
+  party-line: "  &e&l#{position} &f{player} &8- &f{time}{penalty_note}{you}"
+  # footer: {arena} {laps} {players}
+  party-footer: "&8&m                                                  "
+  party-you: " &a(you)"
   # {laps} - inserted as {laps_note} in multi-lap races
   laps-note: " &7({laps} laps)"
   # {penalty} - inserted as {penalty_note} when the run had a jump start penalty
@@ -176,6 +195,8 @@ race:
   boat-spawn-failed: "&cCould not spawn the boat - check 'boat-type' in config.yml."
   seat-failed: "&cCould not seat you in a boat - you have left the race."
   # {arena}
+  maintenance: "&cThe map &f{arena} &cis closed for maintenance."
+  # {arena}
   all-busy: "&cArena &f{arena} &cand all its alternative maps are busy right now. Try again in a moment."
   # Shown when the player was moved to an alternative map. {arena} {world} {requested}
   # Empty by default (silent join) - e.g. "&7{requested} is busy - you race on &f{arena} &7in &f{world}&7."
@@ -187,6 +208,8 @@ race:
 
 command:
   no-permission: "&cYou do not have permission to do that."
+  # {value}
+  invalid-boolean: "&cUse true or false (got &f{value}&c)."
   only-players: "&cThis command can only be used by players."
   # {arena}
   arena-not-found: "&cArena &f{arena} &cdoes not exist. See &f/bre list"
@@ -229,6 +252,9 @@ arena:
   spawn-invalid-index: "&cGrid position must be a whole number of 1 or more (got &f{value}&c)."
   # {value}
   invalid-laps: "&cLaps must be a number from 1 to 999 (got &f{value}&c)."
+  # {arena}
+  maintenance-on: "&aThe map &f{arena} &ais now &cclosed &afor players (running races finish, nobody can join or be queued)."
+  maintenance-off: "&aThe map &f{arena} &ais now &aopen &afor players."
   # {arena} {laps}
   laps-set: "&aA race on &f{arena} &anow has &f{laps} &alap(s). Events can override it: &f/bre start {arena} <laps>"
   # {arena} {spawns}
@@ -271,6 +297,8 @@ arena:
   list-header: "Arenas:"
   # {arena} {checkpoints}
   list-ready: " &8- &f{arena} &a(ready) &7checkpoints: &f{checkpoints}"
+  # {arena} {checkpoints}
+  list-maintenance: " &8- &f{arena} &6(closed - maintenance) &7checkpoints: &f{checkpoints}"
   # {arena} {checkpoints} {missing}
   list-not-ready: " &8- &f{arena} &c(not ready, missing: {missing}) &7checkpoints: &f{checkpoints}"
   # {arena} {status} {spawn} {start} {finish} {checkpoints} {lamps} {laps} {track_blocks} {fallback} {reward_mode} {reward_count}
@@ -286,6 +314,7 @@ arena:
     - " &8- &7Alternative maps: &f{fallback}"
     - " &8- &7Reward: &f{reward_mode} &7({reward_count} commands)"
   info-ready: "&a(ready)"
+  info-maintenance: "&6(closed - maintenance)"
   # {missing}
   info-not-ready: "&c(not ready - missing: {missing})"
   info-same-as-start: "same as start line"
@@ -376,6 +405,13 @@ party:
   no-invite: "&cYou have no valid invitation from &f{player}&c."
   # {leader}
   you-joined: "&aYou joined the party of &f{leader}&a."
+  # {limit}
+  created-by-invite: "&aParty created - you are the leader (max &f{limit} &aplayers)."
+  no-invites: "&cYou have no pending party invitation."
+  # {leaders}
+  multiple-invites: "&eYou were invited by several players: &f{leaders}&e. Choose one with &f/party join <player>&e."
+  # {size}
+  no-map-fits: "&cNo open map has a grid position for every member of your party ({size} players)."
   # {player} {count} {limit}
   joined: "&f{player} &ajoined the party &7({count}/{limit})."
   you-left: "&aYou left the party."

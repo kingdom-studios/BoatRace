@@ -54,6 +54,9 @@ public final class Arena {
 	/** blocks the boat must stay on; empty = the default list from config.yml */
 	private final Set<Material> trackBlocks = EnumSet.noneOf(Material.class);
 
+	/** closed for players by an admin (/bre maintenance): no joining, no random pick, shown disabled in the menu */
+	private boolean maintenance;
+
 	/** laps of a normal race on this arena (events may override it) */
 	private int laps = 1;
 
@@ -141,6 +144,14 @@ public final class Arena {
 		return this.trackBlocks;
 	}
 
+	public boolean isMaintenance() {
+		return this.maintenance;
+	}
+
+	public void setMaintenance(final boolean maintenance) {
+		this.maintenance = maintenance;
+	}
+
 	public int getLaps() {
 		return this.laps;
 	}
@@ -216,6 +227,7 @@ public final class Arena {
 
 		copy.trackBlocks.addAll(this.trackBlocks);
 		copy.laps = this.laps;
+		copy.maintenance = this.maintenance;
 		copy.rewardMode = this.rewardMode;
 		copy.rewardCommands.addAll(this.rewardCommands);
 

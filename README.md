@@ -50,6 +50,7 @@ Admin (`boatrace.admin`):
 | `admin time add\|remove <player> <time> [arena]`, `admin time reset <player> [arena]`, `admin blacklist <player>` | Time / ban management. |
 | `gui <player>` | Opens the map menu for another player (NPCs, hub signs, console). `/bre gui` without a name is for everybody. |
 | `spectate <player\|arena\|off>` | Spectator mode attached to a racer, or to a racer on that map; `off` returns you. |
+| `maintenance <arena> <true\|false>` | Closes / opens a map for players: it stays in the menu but disabled (`gui.yml` `maintenance:`), is never picked by random, a join shows `race.maintenance`, its queue is cancelled. Races already running finish; admins (`boatrace.admin`) can still join with `/bre join <arena>`. Also shown in `list` / `info`. |
 | `reload` | Reloads config.yml, messages.yml, gui.yml and arenas.yml. |
 
 Time format: `12.5` / `12.5s` = seconds, `1500ms` = milliseconds.
@@ -78,7 +79,12 @@ An arena instance (arena + world) is used by one solo racer or one event at a ti
 
 ### Laps
 
-`/bre laps <arena> <count>` (or `laps:` in arenas.yml); events can override it with `/bre event <arena> open <laps>` / `/bre start <arena> <laps>`. Crossing the start/finish line with 100% of the checkpoints of the lap counts the lap (title `new-lap` / `final-lap`, sound `lap`); the race ends after the last lap. The action bar shows `Lap 2/5 | Time: ...` (`actionbar.lap` / `{lap_text}`), and the delta is updated at every checkpoint and lap line. Every lap count has its own leaderboard (`laps` column in `boatrace_records` / `boatrace_runs`); placeholders use the arena's configured lap count.
+`/bre laps <arena> <count>` (or `laps:` in arenas.yml); events can override it with `/bre event <arena> open <laps>` / `/bre start <arena> <laps>`. Crossing the start/finish line with 100% of the checkpoints of the lap counts the lap (title `new-lap` / `final-lap`, sound `lap`); the race ends after the last lap. The action bar shows `Lap 2/5 | Time: ...` (`actionbar.lap` / `{lap_text}`).
+
+**Times in multi-lap races (laps > 1):**
+* The delta to your personal best exists in the **first lap only**; from the second lap on it is neither calculated nor shown.
+* Personal bests (and the leaderboards / placeholders built on them) are those of the standard **single-lap** race. A multi-lap result never becomes a personal best and is not compared with one.
+* Only the **total time** of the whole multi-lap race is saved - to the table `boatrace_event_results` (see Database). A race on an arena that is configured for several laps can still be started with 1 lap in the menu (laps selection) or `/bre start <arena> 1`.
 
 > Existing `messages.yml` files keep their own action bar lines - add `{lap_text}` to them (or delete the file to get the new defaults).
 
@@ -101,12 +107,13 @@ All data lives in the shared MariaDB database configured under `Server` / `Datab
 
 | Table | Content |
 | --- | --- |
-| `boatrace_records` | Best time per (arena, laps, player) with splits and `server_name` (= `Server.Name` of the server it was driven on). A record is only ever replaced by a faster time, decided by the database, so several servers can write at once. |
-| `boatrace_runs` | Every finished race: laps, time, penalty, splits, `personal_best`, `server_name`, `server_group`, `finished_at` (epoch ms) - for a web panel. |
+| `boatrace_records` | Personal best per (arena, player) of the standard **single-lap** race, with splits and `server_name` (= `Server.Name` of the server it was driven on). A record is only ever replaced by a faster time, decided by the database, so several servers can write at once. Multi-lap races never touch it. |
+| `boatrace_runs` | Every finished single-lap race: time, penalty, splits, `personal_best`, `server_name`, `server_group`, `finished_at` (epoch ms) - for a web panel. |
+| `boatrace_event_results` | The total time of every finished **multi-lap** race (laps > 1): `arena`, `laps`, `uuid`, `name`, `total_ms`, `penalty_ms`, `splits`, `finish_position` / `field_size` (event or party, 0 / 1 for solo), `server_name`, `server_group`, `finished_at`. The table for event leaderboards. |
 | `boatrace_blacklist` | Banned players (network wide). |
 | `boatrace_rewards` | Claimed one-time rewards (network wide - a reward can never be given twice). |
 
-The leaderboard cache is reloaded every `records.refresh-seconds` (default 30) so times from other servers appear. An old SQLite `database.db` is imported once on the first start and renamed to `database.db.migrated`. Leaderboards are shared per arena name across all servers.
+The leaderboard cache is reloaded every `records.refresh-seconds` (default 30) so times from other servers appear. An old SQLite `database.db` is imported once on the first start and renamed to `database.db.migrated`. Leaderboards are shared per arena name across all servers. (Multi-lap rows that an earlier development version wrote to `boatrace_records` with `laps` > 1 are simply ignored.)
 
 ## Sounds
 
@@ -122,9 +129,12 @@ Fully configured in `gui.yml`: title, rows, item materials / names / lore / slot
 
 ## Party (`/party`)
 
-Built-in, in-memory, independent of other plugins: `/party create`, `invite <player>`, `join <player>` (the inviter), `leave` (the leader disbands it), `list`, `kick <player>`, `limit <number>` (leader; default / maximum in config.yml `party:`; invitations expire after `invite-timeout-seconds`).
+Built-in, in-memory, independent of other plugins: `/party create`, `invite <player>` (**creates the party automatically** if you are in none - you become the leader), `join [player]` (**without a name** you join the party that invited you, as long as only one did; the leader's name is only needed when several players invited you at the same time), `leave` (the leader disbands it), `list`, `kick <player>`, `limit <number>` (leader; default / maximum in config.yml `party:`; invitations expire after `invite-timeout-seconds`).
 
 When the **leader** joins a map (command or menu) the whole party goes along: if a member is already racing or banned, the leader is told who and nobody starts; otherwise everybody is seated on the grid positions 1, 2, 3 ... of a private event that starts its lights right away. The party needs at least as many grid positions as it has members. Members cannot pick a map themselves.
+
+* **Random map** (`/bre join random`, the menu button) never proposes a map with fewer grid positions than the party has members; if no map fits, the leader is told (`party.no-map-fits`).
+* **Finishing:** a party member who finishes is not teleported - they stay on the map (free to move around, the action bar shows how many are done) until the LAST member has finished. Then everybody gets the party leaderboard in chat (places 1, 2, 3 ... by time, penalties included, `finish.party-*` in messages.yml) and after `finish-teleport-delay-ticks` (default 3 s) the whole party goes to the hub at the same moment. A member who leaves early does not hold the others up.
 
 ## Queue
 
