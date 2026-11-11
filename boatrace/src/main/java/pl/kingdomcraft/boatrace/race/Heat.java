@@ -32,6 +32,8 @@ final class Heat {
 	/** the arena with every position moved into the instance world */
 	final Arena arena;
 	final boolean event;
+	/** a party's own event: not joinable by others, started right away, never found by /bre event */
+	boolean privateHeat;
 
 	Phase phase;
 
@@ -80,6 +82,10 @@ final class Heat {
 				return index;
 
 		return -1;
+	}
+
+	int freeSlots() {
+		return this.capacity() - this.slots.size();
 	}
 
 	int capacity() {

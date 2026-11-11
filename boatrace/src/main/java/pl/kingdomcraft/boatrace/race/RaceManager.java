@@ -2,13 +2,16 @@ package pl.kingdomcraft.boatrace.race;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Predicate;
 
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -35,6 +38,8 @@ import pl.kingdomcraft.boatrace.arena.ArenaManager;
 import pl.kingdomcraft.boatrace.arena.Point;
 import pl.kingdomcraft.boatrace.arena.Region;
 import pl.kingdomcraft.boatrace.arena.Zone;
+import pl.kingdomcraft.boatrace.party.PartyManager;
+import pl.kingdomcraft.boatrace.spectate.SpectateManager;
 import pl.kingdomcraft.boatrace.storage.RaceRecord;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
 import pl.kingdomcraft.boatrace.util.Msg;
@@ -64,9 +69,24 @@ public final class RaceManager {
 		JOINED,
 		BANNED,
 		NOT_READY,
-		/** the arena, all its copies (and - if enabled - every other arena) are occupied */
+		/** the arena, all its copies (and - if enabled - every other arena) are occupied and queueing is off */
 		BUSY,
+		/** the arena is occupied: the player / party waits in the queue of the arena */
+		QUEUED,
+		/** a party member is racing / banned, the grid is too small, or a non-leader tried to pick a map */
+		PARTY_BLOCKED,
 		FAILED
+	}
+
+	/** What the map menu shows for an arena. */
+	public enum ArenaStatus {
+		/** an instance of the arena is free */
+		FREE,
+		/** every instance is occupied */
+		BUSY,
+		/** an event lobby with free grid positions is open */
+		EVENT,
+		NOT_READY
 	}
 
 	/** Outcome of the event commands. */
@@ -99,22 +119,48 @@ public final class RaceManager {
 	private final Settings settings;
 	private final ArenaManager arenas;
 	private final RecordStorage storage;
+	private final PartyManager parties;
 	private final NamespacedKey itemKey;
 
-	private final Map<UUID, RaceSession> sessions = new HashMap<>();
+	/** read from other threads too (PlaceholderAPI), mutated on the main thread only */
+	private final Map<UUID, RaceSession> sessions = new ConcurrentHashMap<>();
 	private final Map<UUID, RaceSession> boats = new HashMap<>();
 	/** occupied arena instances: "arena@world" -> heat */
 	private final Map<String, Heat> heats = new LinkedHashMap<>();
 
+	/** waiting players / parties per arena ("arena name in lower case" -> FIFO list) */
+	private final Map<String, List<QueueEntry>> queues = new LinkedHashMap<>();
+
 	private BukkitTask ticker;
 	private long tickCounter;
+	private long queueTicker;
+	private boolean processingQueues;
+	private boolean shuttingDown;
+	private SpectateManager spectate;
 
-	public RaceManager(final JavaPlugin plugin, final Settings settings, final ArenaManager arenas, final RecordStorage storage) {
+	/** A queued player or party: the owner is the player who picked the map (the party leader). */
+	private static final class QueueEntry {
+
+		final UUID owner;
+		Integer laps;
+
+		QueueEntry(final UUID owner, final Integer laps) {
+			this.owner = owner;
+			this.laps = laps;
+		}
+	}
+
+	public RaceManager(final JavaPlugin plugin, final Settings settings, final ArenaManager arenas, final RecordStorage storage, final PartyManager parties) {
 		this.plugin = plugin;
 		this.settings = settings;
 		this.arenas = arenas;
 		this.storage = storage;
+		this.parties = parties;
 		this.itemKey = new NamespacedKey(plugin, "race_item");
+	}
+
+	public void setSpectate(final SpectateManager spectate) {
+		this.spectate = spectate;
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -127,9 +173,12 @@ public final class RaceManager {
 
 	/** Server shutdown / plugin disable: remove every boat, restore world blocks, give everybody their inventory back. */
 	public void shutdown() {
+		this.shuttingDown = true;
+
 		if (this.ticker != null)
 			this.ticker.cancel();
 
+		this.queues.clear();
 		this.leaveAll(LeaveMode.ORIGIN);
 	}
 
@@ -169,65 +218,123 @@ public final class RaceManager {
 
 	/** A random ready arena, preferring arenas that have a free instance right now. */
 	public Arena pickRandomReadyArena() {
-		final List<Arena> ready = this.arenas.readyArenas();
+		return this.pickRandomReadyArena(arena -> true);
+	}
+
+	/** Same, but only among the arenas the filter accepts (e.g. the ones a player has the permission for). */
+	public Arena pickRandomReadyArena(final Predicate<Arena> filter) {
+		final List<Arena> ready = new ArrayList<>();
 		final List<Arena> free = new ArrayList<>();
 
-		for (final Arena arena : ready)
-			if (this.freeInstanceWorld(arena, null) != null)
-				free.add(arena);
+		for (final Arena arena : this.arenas.readyArenas())
+			if (filter.test(arena)) {
+				ready.add(arena);
+
+				if (this.freeInstanceWorld(arena, null) != null)
+					free.add(arena);
+			}
 
 		final List<Arena> pool = free.isEmpty() ? ready : free;
 
 		return pool.isEmpty() ? null : pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
 	}
 
+	public JoinResult join(final Player player, final Arena arena) {
+		return this.join(player, arena, null);
+	}
+
 	/**
 	 * Joins the arena (or switches to it when the player already races). Silent on success: the player simply
 	 * appears in a boat on the grid.
 	 *
-	 * Order: an open event lobby of the arena with a free grid position -> a free instance of the arena (its own
-	 * world first, then the fallback worlds) -> a random other free arena (fallback.random-free-arena).
+	 * A party leader takes the whole party along (see {@link #joinGroup}); a party member cannot pick a map.
+	 *
+	 * @param laps laps of the new race, null = the arena's setting (ignored when joining an open event)
 	 */
-	public JoinResult join(final Player player, final Arena arena) {
-		if (this.storage.isBlacklisted(player.getUniqueId())) {
-			Msg.send(player, "race.banned");
-			return JoinResult.BANNED;
+	public JoinResult join(final Player player, final Arena arena, final Integer laps) {
+		if (this.parties.isFollower(player)) {
+			Msg.send(player, "party.only-leader-join");
+			return JoinResult.PARTY_BLOCKED;
 		}
 
+		return this.joinGroup(this.parties.groupOf(player), arena, laps, true, true);
+	}
+
+	/**
+	 * Starts a race for one player or a whole party (the leader is first in the list).
+	 *
+	 * Order: an open event lobby of the arena with enough free grid positions -> a free instance of the arena (its own
+	 * world first, then the fallback worlds) -> a random other free arena (fallback.random-free-arena) -> the queue of
+	 * the arena. A party always starts together as a private event on the grid (positions 1, 2, 3 ...), a single
+	 * player as a solo run on position #1.
+	 *
+	 * @param allowOtherArena may the players be sent to another free arena
+	 * @param allowQueue      wait in the queue instead of failing when everything is busy
+	 */
+	private JoinResult joinGroup(final List<Player> players, final Arena arena, final Integer laps, final boolean allowOtherArena, final boolean allowQueue) {
+		final Player leader = players.get(0);
+		final boolean group = players.size() > 1;
+
+		for (final Player member : players)
+			if (this.storage.isBlacklisted(member.getUniqueId())) {
+				if (group)
+					Msg.send(leader, "party.member-banned", "player", member.getName());
+				else
+					Msg.send(leader, "race.banned");
+
+				return JoinResult.BANNED;
+			}
+
 		if (!arena.isReady()) {
-			Msg.send(player, "race.not-ready", "arena", arena.getName(), "missing", arena.missing());
+			Msg.send(leader, "race.not-ready", "arena", arena.getName(), "missing", arena.missing());
 			return JoinResult.NOT_READY;
 		}
 
-		final RaceSession existing = this.sessions.get(player.getUniqueId());
+		if (group) {
+			// the leader may switch maps, the others must not be in a race
+			for (final Player member : players.subList(1, players.size()))
+				if (this.sessions.containsKey(member.getUniqueId())) {
+					Msg.send(leader, "party.member-busy", "player", member.getName());
+					return JoinResult.PARTY_BLOCKED;
+				}
 
-		// 1) event lobby
-		final Heat lobby = this.findEvent(arena);
-
-		if (lobby != null && lobby.phase == Heat.Phase.LOBBY && (lobby.freeSlot() != -1 || (existing != null && existing.heat == lobby))) {
-			if (existing != null && existing.heat == lobby)
-				return JoinResult.JOINED;
-
-			final RaceSession session = existing != null ? existing : this.createSession(player);
-
-			if (session == null)
-				return JoinResult.FAILED;
-
-			this.detach(session);
-			this.attachToEvent(session, lobby);
-
-			return session.disposed ? JoinResult.FAILED : JoinResult.JOINED;
+			if (arena.getSpawns().size() < players.size()) {
+				Msg.send(leader, "party.not-enough-slots", "arena", arena.getName(), "slots", arena.getSpawns().size(), "size", players.size());
+				return JoinResult.PARTY_BLOCKED;
+			}
 		}
 
-		// 2) free instance of this arena, 3) another free arena
+		final RaceSession existing = this.sessions.get(leader.getUniqueId());
+
+		// 1) an open event lobby with room for everybody
+		final Heat lobby = this.findEvent(arena);
+
+		if (lobby != null && lobby.phase == Heat.Phase.LOBBY) {
+			final List<Player> toAttach = new ArrayList<>();
+
+			for (final Player player : players) {
+				final RaceSession current = this.sessions.get(player.getUniqueId());
+
+				if (current == null || current.heat != lobby)
+					toAttach.add(player);
+			}
+
+			if (toAttach.isEmpty())
+				return JoinResult.JOINED;
+
+			if (lobby.freeSlots() >= toAttach.size())
+				return this.attachGroup(toAttach, lobby, false, false);
+		}
+
+		// 2) a free instance of this arena, 3) another free arena the group fits on
 		Arena target = arena;
 		String world = this.freeInstanceWorld(arena, existing);
 
-		if (world == null && this.settings.fallbackEnabled && this.settings.fallbackRandomArena) {
+		if (world == null && allowOtherArena && this.settings.fallbackEnabled && this.settings.fallbackRandomArena) {
 			final List<Arena> candidates = new ArrayList<>();
 
 			for (final Arena other : this.arenas.readyArenas())
-				if (other != arena && this.freeInstanceWorld(other, existing) != null)
+				if (other != arena && other.getSpawns().size() >= players.size() && this.freeInstanceWorld(other, existing) != null)
 					candidates.add(other);
 
 			if (!candidates.isEmpty()) {
@@ -236,44 +343,316 @@ public final class RaceManager {
 			}
 		}
 
+		// 4) everything is busy: wait in line
 		if (world == null) {
-			Msg.send(player, "race.all-busy", "arena", arena.getName());
+			if (allowQueue && this.settings.queueEnabled)
+				return this.enqueue(players, arena, laps);
+
+			Msg.send(leader, "race.all-busy", "arena", arena.getName());
 			return JoinResult.BUSY;
 		}
 
-		final RaceSession session = existing != null ? existing : this.createSession(player);
-
-		if (session == null)
-			return JoinResult.FAILED;
-
-		this.detach(session);
-
 		final Arena instance = world.equals(target.getWorldName()) ? target : target.inWorld(world);
-		final Heat heat = new Heat(instanceKey(target, world), instance, false);
+		final Heat heat = new Heat(instanceKey(target, world), instance, group);
 
-		this.heats.put(heat.key, heat);
+		heat.privateHeat = group;
 
-		session.heat = heat;
-		session.slot = instance.getPrimarySpawnIndex();
-		heat.slots.put(session.slot, session);
+		if (laps != null)
+			heat.laps = Math.max(1, laps);
 
-		this.startSoloRun(session);
+		final JoinResult result;
 
-		if (session.disposed)
-			return JoinResult.FAILED;
+		if (group) {
+			result = this.attachGroup(players, heat, true, true);
 
-		if (target != arena || !world.equals(arena.getWorldName()))
-			Msg.send(player, "race.redirected", "arena", target.getName(), "world", world, "requested", arena.getName());
+			// nobody could be seated (e.g. no inventory snapshot): do not keep the instance occupied
+			if (heat.slots.isEmpty() && this.heats.get(heat.key) == heat)
+				this.releaseHeat(heat);
 
-		return JoinResult.JOINED;
+		} else {
+			final RaceSession session = existing != null ? existing : this.createSession(leader);
+
+			if (session == null)
+				return JoinResult.FAILED;
+
+			this.dequeue(leader.getUniqueId());
+			this.detach(session);
+			this.heats.put(heat.key, heat);
+
+			session.heat = heat;
+			session.slot = instance.getPrimarySpawnIndex();
+			heat.slots.put(session.slot, session);
+
+			this.startSoloRun(session);
+
+			result = session.disposed ? JoinResult.FAILED : JoinResult.JOINED;
+		}
+
+		if (result == JoinResult.JOINED && !group && (target != arena || !world.equals(arena.getWorldName())))
+			Msg.send(leader, "race.redirected", "arena", target.getName(), "world", world, "requested", arena.getName());
+
+		return result;
 	}
 
-	/** /bre leave or the HUB item. Silent: no chat output at all. */
+	/**
+	 * Seats several players on the grid of an event heat: sessions (inventory snapshots) first - if one of them cannot
+	 * be created nothing changes - then each takes the next free grid position.
+	 *
+	 * @param startNow     start the lights right away (private party heats); an open event waits for /bre start
+	 * @param registerHeat the heat is new and occupies its instance from now on
+	 */
+	private JoinResult attachGroup(final List<Player> players, final Heat heat, final boolean startNow, final boolean registerHeat) {
+		final List<RaceSession> toAttach = new ArrayList<>();
+		final List<RaceSession> created = new ArrayList<>();
+
+		for (final Player player : players) {
+			RaceSession session = this.sessions.get(player.getUniqueId());
+
+			if (session == null) {
+				session = this.createSession(player);
+
+				if (session == null) {
+					for (final RaceSession fresh : created)
+						this.dispose(fresh, LeaveMode.SILENT);
+
+					return JoinResult.FAILED;
+				}
+
+				created.add(session);
+			}
+
+			toAttach.add(session);
+		}
+
+		// leave the old heats first - a new heat may have the same key as the leader's old solo heat
+		for (final RaceSession session : toAttach) {
+			this.dequeue(session.playerId);
+			this.detach(session);
+		}
+
+		if (registerHeat)
+			this.heats.put(heat.key, heat);
+
+		for (final RaceSession session : toAttach)
+			if (!session.disposed)
+				this.attachToEvent(session, heat);
+
+		if (startNow && !heat.slots.isEmpty())
+			this.startEventCountdown(heat);
+
+		return toAttach.get(0).disposed ? JoinResult.FAILED : JoinResult.JOINED;
+	}
+
+	/** /bre leave or the HUB item. Silent: no chat output at all (except when leaving a queue). */
 	public void leave(final Player player) {
 		final RaceSession session = this.sessions.get(player.getUniqueId());
 
 		if (session != null)
 			this.dispose(session, LeaveMode.HUB);
+
+		else if (this.dequeue(player.getUniqueId()))
+			Msg.send(player, "queue.left");
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Queue
+	// ------------------------------------------------------------------------------------------
+
+	private static String arenaKey(final Arena arena) {
+		return arena.getName().toLowerCase(Locale.ROOT);
+	}
+
+	/** Puts the player / party in the queue of the busy arena. Tells everybody in the group the position. */
+	private JoinResult enqueue(final List<Player> players, final Arena arena, final Integer laps) {
+		final Player leader = players.get(0);
+		final List<QueueEntry> existing = this.queues.get(arenaKey(arena));
+
+		if (existing != null)
+			for (int i = 0; i < existing.size(); i++)
+				if (existing.get(i).owner.equals(leader.getUniqueId())) {
+					existing.get(i).laps = laps;
+					Msg.send(leader, "queue.already", "arena", arena.getName(), "position", i + 1);
+					return JoinResult.QUEUED;
+				}
+
+		// a player waits for one map at a time
+		this.dequeue(leader.getUniqueId());
+
+		final List<QueueEntry> list = this.queues.computeIfAbsent(arenaKey(arena), k -> new ArrayList<>());
+
+		list.add(new QueueEntry(leader.getUniqueId(), laps));
+
+		for (final Player player : players)
+			Msg.send(player, "queue.joined", "arena", arena.getName(), "position", list.size());
+
+		return JoinResult.QUEUED;
+	}
+
+	/** Removes the queue entry owned by the player. @return true when there was one */
+	private boolean dequeue(final UUID owner) {
+		boolean removed = false;
+
+		for (final Iterator<List<QueueEntry>> it = this.queues.values().iterator(); it.hasNext();) {
+			final List<QueueEntry> list = it.next();
+
+			removed |= list.removeIf(entry -> entry.owner.equals(owner));
+
+			if (list.isEmpty())
+				it.remove();
+		}
+
+		return removed;
+	}
+
+	/** An arena instance became free: let the queues move on in the next tick (never inside the event that freed it). */
+	private void scheduleQueueProcessing() {
+		if (this.queues.isEmpty() || this.shuttingDown || !this.plugin.isEnabled())
+			return;
+
+		Bukkit.getScheduler().runTask(this.plugin, this::processQueues);
+	}
+
+	/**
+	 * First come, first served per arena: the first entry starts as soon as a free instance of ITS arena exists
+	 * (its own world or a fallback copy). Entries whose owner left are dropped, a party is re-read from the party
+	 * system (members may have changed since it queued).
+	 */
+	private void processQueues() {
+		if (this.processingQueues || this.queues.isEmpty())
+			return;
+
+		this.processingQueues = true;
+
+		try {
+			for (final String key : new ArrayList<>(this.queues.keySet())) {
+				final Arena arena = this.arenas.get(key);
+
+				for (final QueueEntry entry : new ArrayList<>(this.queues.getOrDefault(key, List.of()))) {
+					final Player owner = Bukkit.getPlayer(entry.owner);
+
+					if (owner == null || !owner.isOnline()) {
+						this.dequeue(entry.owner);
+						continue;
+					}
+
+					if (arena == null || !arena.isReady()) {
+						this.dequeue(entry.owner);
+						Msg.send(owner, "queue.cancelled", "arena", arena == null ? key : arena.getName());
+						continue;
+					}
+
+					// joined somebody else's party meanwhile - only a leader can pick a map
+					if (this.parties.isFollower(owner)) {
+						this.dequeue(entry.owner);
+						continue;
+					}
+
+					// still racing somewhere else: keep the place, never pull a racer out of a running race
+					if (this.sessions.containsKey(entry.owner))
+						continue;
+
+					// the first one in line has to wait for a free instance - nobody may jump the queue
+					if (this.freeInstanceWorld(arena, null) == null)
+						break;
+
+					this.dequeue(entry.owner);
+					this.joinGroup(this.parties.groupOf(owner), arena, entry.laps, false, false);
+				}
+			}
+
+		} finally {
+			this.processingQueues = false;
+		}
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Status (map menu, placeholders, spectate)
+	// ------------------------------------------------------------------------------------------
+
+	/** Players in a race (finished racers count until they are sent to the hub). Safe to call from any thread. */
+	public int playingCount() {
+		int count = 0;
+
+		for (final RaceSession session : this.sessions.values())
+			if (session.heat != null && !session.disposed)
+				count++;
+
+		return count;
+	}
+
+	/** Players racing on the arena (all its instances / fallback worlds). Safe to call from any thread. */
+	public int playingCount(final String arenaName) {
+		int count = 0;
+
+		for (final RaceSession session : this.sessions.values()) {
+			final Heat heat = session.heat;
+
+			if (heat != null && !session.disposed && heat.arena.getName().equalsIgnoreCase(arenaName))
+				count++;
+		}
+
+		return count;
+	}
+
+	/** Grid positions of all instances the arena can run on at the same time. */
+	public int capacityOf(final Arena arena) {
+		return arena.getSpawns().size() * Math.max(1, this.instanceWorlds(arena).size());
+	}
+
+	public int queueSize(final Arena arena) {
+		final List<QueueEntry> list = this.queues.get(arenaKey(arena));
+
+		return list == null ? 0 : list.size();
+	}
+
+	public ArenaStatus statusOf(final Arena arena) {
+		if (!arena.isReady())
+			return ArenaStatus.NOT_READY;
+
+		final Heat lobby = this.findEvent(arena);
+
+		if (lobby != null && lobby.phase == Heat.Phase.LOBBY && lobby.freeSlots() > 0)
+			return ArenaStatus.EVENT;
+
+		return this.freeInstanceWorld(arena, null) != null ? ArenaStatus.FREE : ArenaStatus.BUSY;
+	}
+
+	/** A racer of the arena to spectate: one whose clock is running, otherwise any. Null when nobody races there. */
+	public Player racerOnArena(final Arena arena) {
+		Player fallback = null;
+
+		for (final RaceSession session : this.sessions.values()) {
+			final Heat heat = session.heat;
+
+			if (heat == null || session.disposed || !heat.arena.getName().equalsIgnoreCase(arena.getName()))
+				continue;
+
+			final Player player = Bukkit.getPlayer(session.playerId);
+
+			if (player == null)
+				continue;
+
+			if (session.state == RaceSession.State.RUNNING)
+				return player;
+
+			fallback = player;
+		}
+
+		return fallback;
+	}
+
+	/** Names of the online racers (tab completion). */
+	public List<String> racerNames() {
+		final List<String> names = new ArrayList<>();
+
+		for (final UUID uuid : this.sessions.keySet()) {
+			final Player player = Bukkit.getPlayer(uuid);
+
+			if (player != null)
+				names.add(player.getName());
+		}
+
+		return names;
 	}
 
 	/**
@@ -394,8 +773,8 @@ public final class RaceManager {
 		for (final RaceSession racer : heat.racers())
 			this.dispose(racer, LeaveMode.HUB);
 
-		this.cleanupHeat(heat);
-		this.heats.remove(heat.key);
+		if (this.heats.get(heat.key) == heat)
+			this.releaseHeat(heat);
 
 		return EventResult.CLOSED;
 	}
@@ -412,7 +791,7 @@ public final class RaceManager {
 
 	private Heat findEvent(final Arena arena) {
 		for (final Heat heat : this.heats.values())
-			if (heat.event && heat.arena.getName().equalsIgnoreCase(arena.getName()))
+			if (heat.event && !heat.privateHeat && heat.arena.getName().equalsIgnoreCase(arena.getName()))
 				return heat;
 
 		return null;
@@ -504,6 +883,10 @@ public final class RaceManager {
 
 	/** Saves the inventory, gives the race kit. @return null when the snapshot could not be written */
 	private RaceSession createSession(final Player player) {
+		// an admin who is spectating must get the real game mode back BEFORE the inventory snapshot is taken
+		if (this.spectate != null)
+			this.spectate.stop(player, true);
+
 		// A snapshot left behind by a crash must be restored BEFORE we take a new one
 		PlayerSnapshot.restore(this.plugin, player);
 
@@ -543,10 +926,16 @@ public final class RaceManager {
 		s.heat = null;
 
 		// An empty event lobby stays open; everything else is freed
-		if (heat.slots.isEmpty() && !(heat.event && heat.phase == Heat.Phase.LOBBY) && this.heats.get(heat.key) == heat) {
-			this.cleanupHeat(heat);
-			this.heats.remove(heat.key);
-		}
+		if (heat.slots.isEmpty() && !(heat.event && heat.phase == Heat.Phase.LOBBY) && this.heats.get(heat.key) == heat)
+			this.releaseHeat(heat);
+	}
+
+	/** Frees the arena instance of the heat; waiting players / parties may take it. */
+	private void releaseHeat(final Heat heat) {
+		this.cleanupHeat(heat);
+		this.heats.remove(heat.key);
+
+		this.scheduleQueueProcessing();
 	}
 
 	private void dispose(final RaceSession s, final LeaveMode mode) {
@@ -1350,6 +1739,8 @@ public final class RaceManager {
 	}
 
 	public void handleQuit(final Player player) {
+		this.dequeue(player.getUniqueId());
+
 		final RaceSession s = this.sessions.get(player.getUniqueId());
 
 		if (s != null)
@@ -1393,6 +1784,10 @@ public final class RaceManager {
 	// ------------------------------------------------------------------------------------------
 
 	private void tick() {
+		// safety net once a second - the normal trigger is an instance being released
+		if (!this.queues.isEmpty() && ++this.queueTicker % 20 == 0)
+			this.processQueues();
+
 		if (this.sessions.isEmpty())
 			return;
 

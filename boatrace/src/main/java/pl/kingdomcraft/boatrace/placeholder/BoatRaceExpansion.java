@@ -20,6 +20,8 @@ import pl.kingdomcraft.boatrace.util.TimeFmt;
  *   %boatrace_top_player_<arena>_<position>% name of the player on that position
  *   %boatrace_top_time_<arena>_<position>%   time on that position
  *   %boatrace_top_server_<arena>_<position>% server (Server.Name) the time was driven on
+ *   %boatrace_playing%                       players currently racing (all arenas)
+ *   %boatrace_playing_<arena>%               players currently racing on that arena
  *
  * Leaderboards are those of the arena's configured lap count (laps in arenas.yml).
  * Arena names may contain underscores. Registered automatically by Foundation (final class,
@@ -43,6 +45,15 @@ public final class BoatRaceExpansion extends SimpleExpansion {
 
 		final String empty = plugin.getSettings().placeholderEmpty;
 		final String lower = identifier.toLowerCase(Locale.ROOT);
+
+		// player counts - PlaceholderAPI may call from async threads, the counters are thread safe
+		if (lower.equals("playing") || lower.startsWith("playing_")) {
+			if (plugin.getRaces() == null)
+				return "0";
+
+			return String.valueOf(lower.equals("playing") ? plugin.getRaces().playingCount()
+					: plugin.getRaces().playingCount(identifier.substring("playing_".length())));
+		}
 
 		if (lower.startsWith("besttime_")) {
 			final String arena = identifier.substring("besttime_".length());

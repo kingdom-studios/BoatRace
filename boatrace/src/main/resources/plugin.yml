@@ -14,3 +14,6 @@ permissions:
   boatrace.join.others:
     description: /bre join <random|arena> <player> - send another player to a race
     default: op
+  boatrace.map.*:
+    description: Play every map (boatrace.map.<arena name in lower case> = a single map). Used by the map menu.
+    default: op

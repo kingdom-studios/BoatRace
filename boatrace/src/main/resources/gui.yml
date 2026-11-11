@@ -1,0 +1,99 @@
+# BoatRace - the map menu (/bre gui, /bre gui <player>).
+# Colors: &. Placeholders in names / lore of map items: {arena} {status} {players} {slots} {laps} {queue} {access} {permission}
+# Reload with /bre reload.
+#
+# A map needs the permission  boatrace.map.<arena name in lower case>  (boatrace.map.* = every map).
+# Without it the click does nothing except showing gui.no-permission from messages.yml.
+
+title: "&8Select a map"
+rows: 3                          # 1 - 6
+
+laps:
+  min: 1
+  max: 5
+
+# Which clicks do what on a MAP item. Click names: LEFT, RIGHT, SHIFT_LEFT, SHIFT_RIGHT, MIDDLE, DROP, CONTROL_DROP ...
+clicks:
+  laps-increase: [LEFT]          # +1 lap (up to laps.max)
+  laps-decrease: [RIGHT]         # -1 lap (down to laps.min)
+  join: [SHIFT_LEFT, SHIFT_RIGHT, MIDDLE]
+
+# {status} in the lore
+status:
+  free: "&aFree"
+  busy: "&cBusy &7- you will be queued"
+  event: "&eEvent open - join now"
+  not-ready: "&7Not ready"
+
+# {access} in the lore
+access:
+  allowed: "&aYou can play this map"
+  denied: "&cYou need &f{permission}"
+
+# Maps with their own icon / slot. The key is the arena name. Arenas that are not listed here are added
+# automatically (see unlisted-maps). Example:
+#
+# maps:
+#   monaco:
+#     slot: 11
+#     material: OAK_BOAT
+#     name: "&b&lMonaco"
+#     lore:
+#       - "&7Status: {status}"
+#       - "&7Players: &f{players}&7/&f{slots}"
+#       - "&7Laps: &e{laps}"
+#       - "{access}"
+maps: {}
+
+# Every ready arena without an entry in "maps" gets this item, in the next free slot from start-slot on.
+unlisted-maps:
+  show: true
+  start-slot: 10
+  material: OAK_BOAT
+  name: "&b&l{arena}"
+  lore:
+    - "&7Status: {status}"
+    - "&7Players: &f{players}&7/&f{slots}"
+    - "&7Laps: &e{laps}"
+    - "&7Queue: &f{queue}"
+    - ""
+    - "{access}"
+    - ""
+    - "&eLeft click &7- laps +1"
+    - "&eRight click &7- laps -1"
+    - "&eShift + click &7- join"
+
+# Joins a random map the player has the permission for. Available to everybody.
+random:
+  enabled: true
+  slot: 22
+  material: ENDER_PEARL
+  name: "&d&lRandom map"
+  lore:
+    - "&7Pick a random map you can play."
+    - "&7Maps available to you: &f{maps}"
+    - "&7Players racing: &f{players}"
+
+close:
+  enabled: true
+  slot: 26
+  material: BARRIER
+  name: "&c&lClose"
+  lore: []
+
+# Empty slots are filled with this item (does nothing).
+filler:
+  enabled: true
+  material: GRAY_STAINED_GLASS_PANE
+  name: " "
+
+# Any number of extra items that do nothing - decoration, hints, separators. "slot: 4" or "slots: [0, 8, 9, 17]".
+items:
+  info:
+    slot: 4
+    material: PAPER
+    name: "&e&lHow to play"
+    lore:
+      - "&7Left / right click a map: change the laps"
+      - "&7Shift + click a map: join it"
+      - "&7A busy map puts you in its queue."

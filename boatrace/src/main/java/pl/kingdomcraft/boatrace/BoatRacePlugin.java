@@ -6,9 +6,13 @@ import org.mineacademy.fo.plugin.SimplePlugin;
 
 import pl.kingdomcraft.boatrace.arena.ArenaManager;
 import pl.kingdomcraft.boatrace.command.BoatRaceCommand;
+import pl.kingdomcraft.boatrace.command.PartyCommand;
+import pl.kingdomcraft.boatrace.gui.GuiManager;
+import pl.kingdomcraft.boatrace.party.PartyManager;
 import pl.kingdomcraft.boatrace.race.RaceListener;
 import pl.kingdomcraft.boatrace.race.RaceManager;
 import pl.kingdomcraft.boatrace.selection.SelectionManager;
+import pl.kingdomcraft.boatrace.spectate.SpectateManager;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
 import pl.kingdomcraft.boatrace.util.Msg;
 
@@ -24,6 +28,9 @@ public final class BoatRacePlugin extends SimplePlugin {
 	private RecordStorage storage;
 	private RaceManager races;
 	private SelectionManager selections;
+	private PartyManager parties;
+	private GuiManager gui;
+	private SpectateManager spectate;
 
 	/** Foundation convention: typed access to the singleton instance. */
 	public static BoatRacePlugin getInstance() {
@@ -58,10 +65,21 @@ public final class BoatRacePlugin extends SimplePlugin {
 			return;
 		}
 
-		this.races = new RaceManager(this, this.settings, this.arenas, this.storage);
+		this.parties = new PartyManager(this.settings);
+		this.registerEvents(this.parties);
+
+		this.races = new RaceManager(this, this.settings, this.arenas, this.storage, this.parties);
 		this.races.start();
 
 		this.registerEvents(new RaceListener(this.races));
+
+		this.spectate = new SpectateManager(this, this.races);
+		this.races.setSpectate(this.spectate);
+		this.registerEvents(this.spectate);
+
+		this.gui = new GuiManager(this, this.arenas, this.races);
+		this.gui.load();
+		this.registerEvents(this.gui);
 
 		this.selections = new SelectionManager(this);
 		this.registerEvents(this.selections);
@@ -69,11 +87,20 @@ public final class BoatRacePlugin extends SimplePlugin {
 		// /boatrace (alias /bre - /br is taken by WorldEdit)
 		this.registerCommands(new BoatRaceCommand());
 
+		// /party - the built-in party system
+		this.registerCommands(new PartyCommand());
+
 		// The PlaceholderAPI expansion (BoatRaceExpansion) is registered automatically by Foundation.
 	}
 
 	@Override
 	protected void onPluginStop() {
+		if (this.spectate != null)
+			this.spectate.shutdown();
+
+		if (this.parties != null)
+			this.parties.clear();
+
 		if (this.races != null)
 			this.races.shutdown();
 
@@ -90,6 +117,9 @@ public final class BoatRacePlugin extends SimplePlugin {
 		this.settings.load(this.getConfig());
 		Msg.load(this);
 		this.arenas.load();
+
+		if (this.gui != null)
+			this.gui.load();
 	}
 
 	public Settings getSettings() {
@@ -106,6 +136,18 @@ public final class BoatRacePlugin extends SimplePlugin {
 
 	public RaceManager getRaces() {
 		return this.races;
+	}
+
+	public PartyManager getParties() {
+		return this.parties;
+	}
+
+	public GuiManager getGui() {
+		return this.gui;
+	}
+
+	public SpectateManager getSpectate() {
+		return this.spectate;
 	}
 
 	public SelectionManager getSelections() {

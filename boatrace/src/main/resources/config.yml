@@ -141,6 +141,24 @@ event:
   auto-start-when-full: true
   start-delay-ticks: 60     # pause before the lights when the lobby filled up / /bre start was used
 
+# Party (/party, in memory): default and maximum number of players per party, how long an invitation is valid.
+party:
+  default-limit: 4
+  max-limit: 10
+  invite-timeout-seconds: 60
+
+# Queue: joining a busy map (no free instance, no fallback copy / free arena) puts the player - or the whole party
+# when its leader joins - in the queue of that map. The first in line starts as soon as the race on it is over.
+# false = a busy map is simply refused.
+queue:
+  enabled: true
+
+# Map permissions boatrace.map.<arena name in lower case> (boatrace.map.* = all maps) are always checked by the map menu
+# (/bre gui). true = /bre join <arena> requires them for joining yourself too (default false: NPCs, signs and old
+# habits keep working). Sending other players (/bre join <arena> <player>) never needs them.
+map-permissions:
+  enforce-on-join-command: false
+
 # Fallback maps: an arena is used by one solo racer (or one event) at a time. When it is busy, the player is
 # sent to an identical copy of the track in another world (same coordinates).
 fallback:

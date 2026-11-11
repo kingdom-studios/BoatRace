@@ -81,7 +81,8 @@ public final class Msg {
 	// Text building
 	// ------------------------------------------------------------------------------------------
 
-	private static String apply(String text, final Object... placeholders) {
+	/** Replaces {name} placeholders (and {prefix}); also used for the texts of gui.yml. */
+	public static String apply(String text, final Object... placeholders) {
 		if (text.indexOf('{') < 0)
 			return text;
 

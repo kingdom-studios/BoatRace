@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.mineacademy.fo.command.SimpleCommandGroup;
 
 import pl.kingdomcraft.boatrace.arena.Arena;
+import pl.kingdomcraft.boatrace.gui.GuiManager;
 import pl.kingdomcraft.boatrace.race.RaceManager.JoinResult;
 
 /**
@@ -16,7 +17,9 @@ import pl.kingdomcraft.boatrace.race.RaceManager.JoinResult;
  * /bre join <arena> [player]       a specific arena
  *
  * Sending another player needs boatrace.join.others (works from the console, NPCs, command blocks...).
- * A successful join is completely silent - the player just appears in a boat on the grid.
+ * A successful join is completely silent - the player just appears in a boat on the grid. A busy arena puts the
+ * player (or the party, when a party leader joins) in the queue. With map-permissions.enforce-on-join-command the
+ * permission boatrace.map.<arena> is required for joining yourself, like in the map menu.
  */
 final class JoinSub extends RaceSubCommand {
 
@@ -47,15 +50,20 @@ final class JoinSub extends RaceSubCommand {
 		}
 
 		final Arena arena;
+		final boolean checkPermission = this.plugin().getSettings().enforceMapPermissionOnCommand && this.getSender() == target;
 
 		if (this.args.length == 0 || "random".equalsIgnoreCase(this.args[0])) {
-			arena = this.plugin().getRaces().pickRandomReadyArena();
+			arena = this.plugin().getRaces().pickRandomReadyArena(candidate -> !checkPermission || target.hasPermission(GuiManager.permission(candidate)));
 
 			if (arena == null)
 				this.fail("command.no-ready-arena");
 
-		} else
+		} else {
 			arena = this.requireArena(0);
+
+			if (checkPermission && !target.hasPermission(GuiManager.permission(arena)))
+				this.fail("gui.no-permission", "arena", arena.getName(), "permission", GuiManager.permission(arena));
+		}
 
 		final JoinResult result = this.plugin().getRaces().join(target, arena);
 
@@ -65,6 +73,9 @@ final class JoinSub extends RaceSubCommand {
 				case BANNED -> this.info("race.banned");
 				case NOT_READY -> this.info("race.not-ready", "arena", arena.getName(), "missing", arena.missing());
 				case BUSY -> this.info("race.all-busy", "arena", arena.getName());
+				case QUEUED, PARTY_BLOCKED -> {
+					// the players concerned were already told (queue position / which party member is busy)
+				}
 				default -> this.info("race.inventory-save-failed");
 			}
 	}

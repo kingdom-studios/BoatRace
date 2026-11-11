@@ -16,6 +16,7 @@ public final class BoatRaceCommand extends SimpleCommandGroup {
 		this.registerSubcommand(new LeaveSub(this));
 		this.registerSubcommand(new ResetSub(this));
 		this.registerSubcommand(new ListSub(this));
+		this.registerSubcommand(new GuiSub(this));
 
 		// admin: selection
 		this.registerSubcommand(new WandSub(this));
@@ -41,6 +42,9 @@ public final class BoatRaceCommand extends SimpleCommandGroup {
 		// admin: events (multiplayer start)
 		this.registerSubcommand(new EventSub(this));
 		this.registerSubcommand(new StartSub(this));
+
+		// admin: observing
+		this.registerSubcommand(new SpectateSub(this));
 
 		// admin: management
 		this.registerSubcommand(new AdminSub(this));

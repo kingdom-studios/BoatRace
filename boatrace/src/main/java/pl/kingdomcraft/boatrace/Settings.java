@@ -99,6 +99,13 @@ public final class Settings {
 	public boolean eventAutoStartWhenFull = true;
 	public int eventStartDelayTicks = 60;
 
+	// --- party / queue / map permissions ---
+	public int partyDefaultLimit = 4;
+	public int partyMaxLimit = 10;
+	public int partyInviteSeconds = 60;
+	public boolean queueEnabled = true;
+	public boolean enforceMapPermissionOnCommand = false;
+
 	// --- fallback maps ---
 	public boolean fallbackEnabled = true;
 	public boolean fallbackRandomArena = true;
@@ -176,6 +183,12 @@ public final class Settings {
 
 		this.eventAutoStartWhenFull = c.getBoolean("event.auto-start-when-full", true);
 		this.eventStartDelayTicks = Math.max(0, c.getInt("event.start-delay-ticks", 60));
+
+		this.partyMaxLimit = Math.max(2, c.getInt("party.max-limit", 10));
+		this.partyDefaultLimit = Math.max(2, Math.min(this.partyMaxLimit, c.getInt("party.default-limit", 4)));
+		this.partyInviteSeconds = Math.max(5, c.getInt("party.invite-timeout-seconds", 60));
+		this.queueEnabled = c.getBoolean("queue.enabled", true);
+		this.enforceMapPermissionOnCommand = c.getBoolean("map-permissions.enforce-on-join-command", false);
 
 		this.fallbackEnabled = c.getBoolean("fallback.enabled", true);
 		this.fallbackRandomArena = c.getBoolean("fallback.random-free-arena", true);

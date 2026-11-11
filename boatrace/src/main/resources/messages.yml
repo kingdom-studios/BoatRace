@@ -186,6 +186,7 @@ race:
   off-track-reset: ""
 
 command:
+  no-permission: "&cYou do not have permission to do that."
   only-players: "&cThis command can only be used by players."
   # {arena}
   arena-not-found: "&cArena &f{arena} &cdoes not exist. See &f/bre list"
@@ -352,3 +353,94 @@ event:
   empty: "&cNobody has joined the event on &f{arena} &cyet."
   # {arena} {world} {phase} {players} {slots} {laps}
   status: "&7Event on &f{arena}&7: &f{phase} &7in world &f{world}&7, racers &f{players}/{slots}&7, laps &f{laps}"
+
+# ------------------------------------------------------------------------------------------------
+# Party (/party) - in memory, only for BoatRace
+# ------------------------------------------------------------------------------------------------
+party:
+  already-in: "&cYou are already in a party. Leave it first with &f/party leave&c."
+  not-in-party: "&cYou are not in a party. Create one with &f/party create&c."
+  not-leader: "&cOnly the party leader can do that."
+  # {limit}
+  created: "&aParty created - you are the leader (max &f{limit} &aplayers). Invite players with &f/party invite <player>&a."
+  cannot-invite-self: "&cYou cannot invite yourself."
+  # {player}
+  target-in-party: "&c{player} is already in a party."
+  # {limit}
+  full: "&cThe party is full ({limit} players max)."
+  # {player} {seconds}
+  invite-sent: "&aInvited &f{player} &ato your party &7(valid for {seconds}s)."
+  # {leader} {seconds}
+  invited: "&f{leader} &7invited you to their party. Join with &f/party join {leader} &7(valid for {seconds}s)."
+  # {player}
+  no-invite: "&cYou have no valid invitation from &f{player}&c."
+  # {leader}
+  you-joined: "&aYou joined the party of &f{leader}&a."
+  # {player} {count} {limit}
+  joined: "&f{player} &ajoined the party &7({count}/{limit})."
+  you-left: "&aYou left the party."
+  # {player}
+  left: "&f{player} &7left the party."
+  disbanded: "&cThe party was disbanded."
+  kicked: "&cYou were kicked from the party."
+  # {player}
+  kick-broadcast: "&f{player} &7was kicked from the party."
+  cannot-kick-self: "&cYou cannot kick the leader. Use &f/party leave &cto disband the party."
+  # {player}
+  not-member: "&c{player} is not in your party."
+  # {limit}
+  limit-set: "&aParty limit set to &f{limit}&a."
+  # {min} {max} {value}
+  limit-invalid: "&cThe limit must be a number from {min} to {max} (got &f{value}&c)."
+  # {count} {limit}
+  list-header: "&7Party &8(&f{count}&7/&f{limit}&8):"
+  # {player} {role}
+  list-line: " &8- &f{player} &7({role}&7)"
+  role-leader: "&6leader"
+  role-member: "&7member"
+  # Starting a race with the party (the leader gets these messages)
+  # {player}
+  member-busy: "&c{player} is already in a race - the party cannot start."
+  member-banned: "&c{player} is banned from races - the party cannot start."
+  # {arena} {slots} {size}
+  not-enough-slots: "&cArena &f{arena} &conly has {slots} grid position(s), but your party has {size} players."
+  only-leader-join: "&cOnly the party leader can pick a map. Leave the party with &f/party leave &cto race alone."
+
+# ------------------------------------------------------------------------------------------------
+# Queue for busy maps
+# ------------------------------------------------------------------------------------------------
+queue:
+  # {arena} {position}
+  joined: "&eThe arena &f{arena} &eis busy - you are in the queue &7(position &f#{position}&7). Leave it with &f/bre leave&7."
+  already: "&eYou are already waiting for &f{arena} &7(position &f#{position}&7)."
+  left: "&aYou left the queue."
+  # {arena}
+  cancelled: "&cThe queue for &f{arena} &cwas cancelled - the arena is no longer available."
+
+# ------------------------------------------------------------------------------------------------
+# Map menu (/bre gui) - the items themselves are configured in gui.yml
+# ------------------------------------------------------------------------------------------------
+gui:
+  # {arena} {permission}
+  no-permission: "&cYou do not have permission to play &f{arena}&c. &7({permission})"
+  no-random: "&cThere is no map you can play right now."
+  # {player}
+  opened-other: "&aOpened the map menu for &f{player}&a."
+
+# ------------------------------------------------------------------------------------------------
+# /bre spectate
+# ------------------------------------------------------------------------------------------------
+spectate:
+  # {player}
+  started: "&aYou are now spectating &f{player}&a. Sneak to fly freely, &f/bre spectate off &ato return."
+  # {player} {arena}
+  started-arena: "&aSpectating &f{player} &7on &f{arena}&a. Sneak to fly freely, &f/bre spectate off &ato return."
+  stopped: "&aYou stopped spectating."
+  not-spectating: "&cYou are not spectating anybody."
+  # {arena}
+  nobody: "&cNobody is racing on &f{arena} &cright now."
+  # {player}
+  not-racing: "&c{player} is not racing."
+  you-racing: "&cYou cannot spectate while you are racing."
+  # {value}
+  unknown: "&cNo racing player or arena named &f{value}&c."
