@@ -1,6 +1,6 @@
 # BoatRace
 
-F1-style boat racing: start lights, false starts, invisible checkpoints, deltas to personal/track records, SQLite leaderboards, PlaceholderAPI support.
+F1-style boat racing: start lights, false starts, invisible checkpoints, deltas to personal/track records, MariaDB leaderboards, ranking (ELO), casual and competitive team races, CaptainHook integration, PlaceholderAPI support.
 
 ## Building
 
@@ -102,8 +102,7 @@ An arena instance (arena + world) is used by one solo racer or one event at a ti
 
 ### Upgrading from older versions
 
-**Automatyczne uzupełnianie plików (start i `/bre reload`)** – `config.yml`, `messages.yml`, `gui.yml`: brakujące klucze z jara są dopisywane (z wartością domyślną i komentarzem) w swojej sekcji. Twoje wartości nigdy się nie zmieniają, nieużywane klucze zostają. Kopia przed zapisem: `plugins/BoatRace/backups/<plik>.<data>.bak`; log mówi, co dodano. Kolekcje (`fallback.maps`, `ranking.xp-multipliers`, `competitive.colors`, gui `maps`, `items`, `competitive-buttons`) dodawane tylko w całości, gdy ich brak – nigdy nie dosypuje przykładów. Plik z błędem YAML nie jest ruszany. Zapis jest kosmetycznie "znormalizowany" (cudzysłowy, listy `[a, b]` → wypunktowane, wyrównanie komentarzy) – działanie bez zmian. `arenas.yml` i pliki CaptainHooka na proxy nie są ruszane.
-
+**Automatic file update (on start and `/bre reload`)** – `config.yml`, `messages.yml`, `gui.yml`: keys of the jar that your file is missing are added (with their default value and comment) inside their own section. Your values are never changed, unused keys stay. A copy is saved first: `plugins/BoatRace/backups/<file>.<date>.bak`; the log lists what was added. Collections (`fallback.maps`, `ranking.xp-multipliers`, `competitive.colors`, gui `maps`, `items`, `competitive-buttons`) are only added as a whole when missing - never filled up with examples. A file with a YAML error is not touched. Saving normalizes the formatting (quotes, `[a, b]` lists → bullet lists, comment alignment) - behavior unchanged. `arenas.yml` and the CaptainHook files on the proxy are never touched.
 
 Old point-based checkpoints and finish are migrated to 7x3x7 zones. The old `start-block` lamp row is not migrated: set the lamps again with `/bre lights`, and set the start line with `/bre setstart`.
 
@@ -147,94 +146,94 @@ When the **leader** joins a map (command or menu) the whole party goes along: if
 
 A busy map (no free instance, no fallback copy, no free alternative arena) puts the player - or the party when its leader joins - in the queue of that map (`queue.enabled`, texts in `queue.*`). The first in line starts automatically when the race on the map is over; `/bre leave` leaves the queue. A player who is still racing elsewhere keeps their place until they are free.
 
-## Ranking, CaptainHook, strona WWW (skrót)
+## Ranking, CaptainHook, website (summary)
 
-**Ranking (ELO)** – `config.yml` `ranking:`, działa też bez CaptainHooka.
-* Liczą się: event / party, min. `min-racers` (2) graczy przy zgaszeniu świateł. Solo nigdy.
-* Kolejność = pojedynki: każdy wygrał z każdym za sobą. DNF = za wszystkimi (kto wyszedł wcześniej, ten niżej).
-* Rozliczenie, gdy nikt już nie płynie. Reload / stop serwera = nikt nic nie traci.
-* Zero-sum: ustawione wyniki między kolegami nic nie dają (punkty krążą tam i z powrotem). Wygrana ze słabszym ≈ nic, przegrana z nim boli.
-* `k-factor` 16 = ile punktów "w grze" na wyścig Casual (Competitive: `competitive.k-factor` 48). Start 1000, minimum 100.
-* `party-races: false` = wyścigi party poza rankingiem (gdyby znajomi farmili).
+**Ranking (ELO)** – `config.yml` `ranking:`, works without CaptainHook too.
+* Counts: events / parties with at least `min-racers` (2) racers at lights out. Solo runs never.
+* Order = duels: everybody beat everybody behind them. DNF = behind all finishers (who left first is last).
+* Settled once nobody is racing any more. Reload / server stop = nobody loses anything.
+* Zero-sum: arranged results between friends gain nothing (the points just go back and forth). Beating a weaker player ≈ nothing, losing to them hurts.
+* `k-factor` 16 = points at stake per casual race (competitive: `competitive.k-factor` 48). Start 1000, minimum 100.
+* `party-races: false` = party races do not count (if friends farm).
 
-**Seria "nie ostatni"** – rankingowy wyścig ukończony nie na ostatnim miejscu = +1, ostatnie miejsce / DNF = 0. Trzymana w bazie (między serwerami i po restarcie).
+**"Not last" streak** – a ranked race finished not in last place = +1, last place / DNF = 0. Stored in the database (across servers and restarts).
 
-**XP karnetu (CaptainHook)** – `captainhook.pass-xp` (finish / win / podium / rekord / co 250 bloków) × mnożnik z rankingu (`ranking.xp-multipliers`: <900 ×0.5 … 1500+ ×2.0). Dzienny limit `daily-limit`. Bez sezonu = brak XP (bez błędów).
+**Season pass XP (CaptainHook)** – `captainhook.pass-xp` (finish / win / podium / personal best / per 250 blocks) × the rating multiplier (`ranking.xp-multipliers`: <900 ×0.5 … 1500+ ×2.0). Daily cap `daily-limit`. No active season = no XP (no errors).
 
-**Co wysyłamy do CaptainHooka** (gra `formula-boat-racing`, tylko UKOŃCZONE wyścigi, 1 paczka / wyścig, bez zer):
+**What is sent to CaptainHook** (game `formula-boat-racing`, FINISHED races only, 1 message per race, no zeros):
 
-| stat | op | jednostka |
+| stat | op | unit |
 |---|---|---|
-| `races`, `wins`, `podiums`, `laps` | add | szt. (wins/podiums tylko w rankingowych) |
-| `distance` | add | bloki |
-| `race_time_ms` | add | ms bez kar (średnia = distance / czas) |
-| `fastest_lap`, `fastest_<track>` | min | ms, najlepsze okrążenie |
-| `fastest_race_<track>` | min | ms, cały wyścig (tylko domyślna liczba okrążeń toru) |
-| `top_avg_speed` | max | bloki/s × 100 (5 b/s = 500) |
-| `best_streak` | max | wysyłamy AKTUALNĄ serię po każdym rankingowym finiszu |
-| `rating` | set | punkty rankingu, osobna wiadomość po rozliczeniu |
+| `races`, `wins`, `podiums`, `laps` | add | count (wins / podiums only in ranked races) |
+| `distance` | add | blocks |
+| `race_time_ms` | add | ms without penalties (average speed = distance / time) |
+| `fastest_lap`, `fastest_<track>` | min | ms, best lap |
+| `fastest_race_<track>` | min | ms, whole race (only with the arena's own lap count) |
+| `top_avg_speed` | max | blocks/s × 100 (5 b/s = 500) |
+| `best_streak` | max | the CURRENT streak, sent after every ranked finish |
+| `rating` | set | ranking points, separate message once the race is settled |
 
-* `<track>` = nazwa areny małymi literami, inne znaki niż `a-z0-9_` → `_`, max 19 znaków. Lista: `/bre tracks`.
-* Czasy oficjalne (z karami). Prędkość i `race_time_ms` bez kar.
-* Odrzucane w całości (ostrzeżenie w logu): okrążenie < `min-lap-seconds` (5) lub średnia > `max-avg-speed` (75 b/s). Powód: `min`/`max` zostaje w bazie na zawsze.
-* Nigdy nie zmieniać znaczenia/jednostek kluczy – strona na nich stoi. Nowe znaczenie = nowy klucz.
+* `<track>` = arena name in lower case, characters other than `a-z0-9_` → `_`, max 19 characters. List: `/bre tracks`.
+* Official times (penalties included). Speed and `race_time_ms` without penalties.
+* Rejected as a whole (warning in the log): a lap < `min-lap-seconds` (5) or an average > `max-avg-speed` (75 b/s). Reason: a `min` / `max` stays in the database forever.
+* Never change the meaning / unit of a key - the website relies on them. New meaning = new key.
 
-**Wyzwania w CaptainHooku** (proxy: `achievements.yml`, `missions.yml`, potem `/captainhookproxy reload`):
-* Osiągnięcie z licznika: `source: { type: minigame-stat, game: formula-boat-racing, stat: wins }`, `goal: 25`.
-* Osiągnięcie z rekordu "co najmniej": `stat: top_avg_speed`, `goal: 500` (pasek rośnie z najlepszym wynikiem).
-* Osiągnięcie z czasu "poniżej": `stat: fastest_race_<track>`, `at-most: 65000` (ms), goal 1.
-* Misja z licznika: `objective: MINIGAME_STAT`, `filter: { game, stat: races }`, `target: 3`.
-* Misja progowa ("raz osiągnij X"): `filter: { game, stat, min-value: N }`, `target: 1` – liczy +1 za każde zgłoszenie z wartością ≥ N.
-  * Średnia ≥ 5 b/s: `stat: top_avg_speed`, `min-value: 500`.
-  * 3 wyścigi pod rząd nie ostatni: `stat: best_streak`, `min-value: 3` (gotowe: `weekly-br-streak-3`).
-  * Uwaga: seria z poprzedniego tygodnia liczy się dalej (2 w niedzielę + 1 w poniedziałek = zaliczone).
+**Challenges in CaptainHook** (proxy: `achievements.yml`, `missions.yml`, then `/captainhookproxy reload`):
+* Achievement from a counter: `source: { type: minigame-stat, game: formula-boat-racing, stat: wins }`, `goal: 25`.
+* Achievement from an "at least" record: `stat: top_avg_speed`, `goal: 500` (the bar grows with the best result).
+* Achievement from an "under" time: `stat: fastest_race_<track>`, `at-most: 65000` (ms), goal 1.
+* Mission from a counter: `objective: MINIGAME_STAT`, `filter: { game, stat: races }`, `target: 3`.
+* Threshold mission ("reach X once"): `filter: { game, stat, min-value: N }`, `target: 1` – counts +1 for every report with a value ≥ N.
+  * Average ≥ 5 b/s: `stat: top_avg_speed`, `min-value: 500`.
+  * 3 races in a row without being last: `stat: best_streak`, `min-value: 3` (ready: `weekly-br-streak-3`).
+  * Note: a streak from the previous week keeps counting (2 on Sunday + 1 on Monday = done).
 
-**Hologramy (PlaceholderAPI)** – patrz Placeholders niżej. HolographicDisplays: wpisz placeholder wprost w linii, np. `#1 %boatrace_rating_top_player_1% %boatrace_rating_top_value_1%`.
+**Holograms (PlaceholderAPI)** – see Placeholders below. HolographicDisplays: put the placeholder straight into the line, e.g. `#1 %boatrace_rating_top_player_1% %boatrace_rating_top_value_1%`.
 
-**Znane ograniczenia** – cache rankingu odświeżany co `records.refresh-seconds` (30 s): po zmianie serwera przez chwilę mogą być widoczne stare punkty (w bazie się nie gubią). Dzienny limit XP jest w pamięci (zeruje się po restarcie).
+**Known limits** – the ranking cache is refreshed every `records.refresh-seconds` (30 s): right after switching servers a player may briefly see old points (nothing is lost in the database). The daily XP cap is in memory (reset by a restart).
 
-## Casual i Competitive (skrót)
+## Casual and Competitive (summary)
 
 | | Casual | Competitive |
 |---|---|---|
-| Co | solo, eventy, wyścigi party (każdy na siebie) | drużyna na drużynę z lobby |
-| Ranking | wspólny `rating`, `ranking.k-factor` 16 | ten sam `rating`, `competitive.k-factor` 48 |
-| XP | `captainhook.pass-xp` | × `xp-multiplier` (2.0) + win / full-team + bonus składu |
-| Zbroja / tag | nie | tak |
+| What | solo, events, party races (everybody for themselves) | team against team, from a lobby |
+| Ranking | shared `rating`, `ranking.k-factor` 16 | the same `rating`, `competitive.k-factor` 48 |
+| XP | `captainhook.pass-xp` | × `xp-multiplier` (2.0) + win / full-team + lineup bonus |
+| Armor / tag | no | yes |
 
-**Jeden ranking na gracza** – party są tymczasowe, więc nie ma rankingu drużyn. Każdy gra na swój `rating`; mecz Competitive daje + za wygraną drużyny, − za słabszy wynik.
+**One rating per player** – parties are temporary, so there is no team ranking. Everybody plays for their own `rating`; a competitive match gives + for a team win, − for a weaker result.
 
-**Włączenie** – `config.yml` `competitive.enabled: true` (domyślnie off). Przycisk GUI: `gui.yml` `competitive-buttons` (`enabled: true`, wolny slot).
+**Enable** – `config.yml` `competitive.enabled: true` (off by default). GUI button: `gui.yml` `competitive-buttons` (`enabled: true`, a free slot).
 
-**Limity na arenę** – `/bre compset <arena> min 4` / `max 8` / `on|off` / `reset` / `info` (albo `arenas.yml` `competitive: { enabled, min-players, max-players }`). Brak = `competitive.min-players` (4) i max = liczba spawnów. Spawnów nie trzeba zmieniać.
+**Limits per arena** – `/bre compset <arena> min 4` / `max 8` / `on|off` / `reset` / `info` (or `arenas.yml` `competitive: { enabled, min-players, max-players }`). Not set = `competitive.min-players` (4) and max = number of spawns. The spawns do not need to change.
 
-**Dołączanie** – `/bre ranked <arena|random>` / przycisk GUI (drugi klik = wyjście). Lider party = cała drużyna. Solo = drużyna 1-osobowa. Max drużyna: `max-team-size` (4).
-* Lobby bierze drużyny po kolei, póki się mieszczą (max graczy, max drużyn = liczba kolorów). Reszta czeka na następny mecz.
-* ≥ min graczy i ≥ 2 drużyny → odliczanie `countdown-seconds` (30). Pełne lobby → start od razu. Spadek poniżej min → odliczanie anulowane.
-* Lobby `random` = min najniższy, max najwyższy ze wszystkich aren; mecz trafia na wolną arenę, która pasuje liczbą graczy.
-* Wypada z lobby: wyjście z serwera, zmiana party, start innego wyścigu, ban.
+**Joining** – `/bre ranked <arena|random>` / GUI button (second click = leave). Party leader = the whole team. Solo = a team of 1. Biggest team: `max-team-size` (4).
+* The lobby takes teams in order while they fit (max racers, max teams = number of colors). The rest waits for the next match.
+* ≥ min racers and ≥ 2 teams → countdown `countdown-seconds` (30). Full lobby → starts at once. Dropping below min → countdown cancelled.
+* `random` lobby = the lowest min and the highest max of all arenas; the match goes to a free arena that fits the number of racers.
+* Dropped from the lobby: leaving the server, party change, starting another race, ban.
 
-**Mecz**
-* Siatka: pierwsi zawodnicy każdej drużyny, potem drudzy … Kolory `competitive.colors` (8 domyślnych), pełna skórzana zbroja, tytuł + czat "Twoja drużyna", tag LuckPerms (transient meta `boatrace_team`, w czacie/TAB `%luckperms_meta_boatrace_team%`, bez LP `%boatrace_team_tag%`).
-* Wynik: punkty F1 za miejsce (`competitive.points`, DNF = 0), drużyna = ŚREDNIA członków (różne rozmiary porównywalne, najsłabszy też się liczy). Remis → najlepsze pojedyncze miejsce.
-* Pasek akcji: wynik drużyny na żywo przed czasem (`actionbar.team`).
-* Rating: drużyny w kolejności wyniku = jeden wyścig ELO (siła drużyny = średni rating członków), każdy członek dostaje zmianę swojej drużyny. Nikt nie dojechał → brak zmian.
+**Match**
+* Grid: the first racers of every team, then the second ones … Colors `competitive.colors` (8 by default), full leather armor, title + chat "Your team", LuckPerms tag (transient meta `boatrace_team`, in chat / TAB `%luckperms_meta_boatrace_team%`, without LP `%boatrace_team_tag%` - empty outside a match).
+* Result: F1 points by place (`competitive.points`, DNF = 0), team = AVERAGE of its members (different sizes are comparable, the weakest member counts too). Tie → the best single place.
+* Action bar: the live team score in front of the time (`actionbar.team`).
+* Rating: the teams in standing order = one ELO race (team strength = average rating of its members), every member gets their team's change. Nobody finished → no change.
 
-**Kary** – wyjście z trwającego meczu (też w trakcie świateł) = DNF + `-15` ratingu + `5 min` bez Competitive. Bypass: `boatrace.competitive.bypass` (domyślnie op). Reload / stop serwera nie karze.
+**Penalties** – leaving a running match (also during the start lights) = DNF + `-15` rating + `5 min` without competitive. Bypass: `boatrace.competitive.bypass` (op by default). Reload / server stop never punishes.
 
-**Bonus stałego składu** – ta sama drużyna (dokładnie ci sami gracze) w kolejnym meczu: +10% XP za mecz z rzędu, max +30%, przerwa > 30 min = od nowa. Tylko w pamięci: 1 mały wpis na gracza (odcisk składu, licznik, czas), brak statystyk drużyn; restart zeruje.
+**Same lineup bonus** – the same team (exactly the same players) in the next match: +10% XP per match in a row, max +30%, a break > 30 min = starts again. In memory only: 1 small entry per player (lineup fingerprint, counter, time), no team stats; a restart resets it.
 
-**CaptainHook** – statystyki indywidualne jak w każdym wyścigu + `comp_races`, `comp_wins`, `comp_full_team` (add, tylko ci, co dojechali), `rating` (set). Nowe klucze → zgłosić zespołowi strony.
+**CaptainHook** – the individual stats of every race + `comp_races`, `comp_wins`, `comp_full_team` (add, only those who finished), `rating` (set). New keys → tell the website team.
 
-**Placeholdery** – `%boatrace_team%`, `%boatrace_team_tag%`, `%boatrace_comp_games%`, `%boatrace_comp_wins%`; ranking jak w Casual (`%boatrace_rating...%`).
+**Placeholders** – `%boatrace_team%`, `%boatrace_team_tag%`, `%boatrace_comp_games%`, `%boatrace_comp_wins%`; ranking as in casual (`%boatrace_rating...%`).
 
-## Lista TAB na osobnym serwerze (skrót)
+## Tab list on a dedicated server (summary)
 
-`config.yml` `tablist.session-only: true` – gracz widzi w TAB tylko swoją grupę: **lobby** albo **swoją sesję** (instancja areny: solo, event, party, Competitive – też na siatce i po mecie). Widz (`/bre spectate`) widzi sesję, którą ogląda.
-* Tylko lista TAB (Paper `unlistPlayer`) – w świecie wszyscy dalej widoczni. Niczego nie zapisuje (crash = nic nie zostaje), wyłączenie / stop pluginu przywraca wszystkich.
-* Odświeżanie co 0,5 s + przy wejściu gracza. Vanish innych pluginów nie jest ruszany.
-* `boatrace.tablist.bypass` = widzi wszystkich (domyślnie nikt, także op).
-* Plugin TAB (NEZNAMY): działa razem z nim (formatowanie / sortowanie bez zmian). Warunek: `layout.enabled: false` i `per-world-playerlist.enabled: false` w TAB.
+`config.yml` `tablist.session-only: true` – a player only sees their own group in the tab list: the **lobby** or **their session** (arena instance: solo, event, party, competitive – also on the grid and after the finish). A spectator (`/bre spectate`) sees the session they watch.
+* Tab list only (Paper `unlistPlayer`) – everybody stays visible in the world. Nothing is saved (crash = nothing left behind), switching it off / stopping the plugin lists everybody again.
+* Refreshed every 0.5 s + when a player joins. Vanish of other plugins is left alone.
+* `boatrace.tablist.bypass` = sees everybody (nobody by default, not even ops).
+* TAB plugin (NEZNAMY): works together with it (formatting / sorting unchanged). Requirement: `layout.enabled: false` and `per-world-playerlist.enabled: false` in TAB.
 
 ## Messages
 
