@@ -36,11 +36,12 @@ public final class ConfigUpdater {
 	private ConfigUpdater() {
 	}
 
-	/** config.yml, messages.yml and gui.yml of BoatRace, each with its own collections. */
+	/** config.yml, messages.yml and guis.yml of BoatRace, each with its own collections. */
 	public static void updateAll(final JavaPlugin plugin) {
 		update(plugin, "config.yml", Set.of("fallback.maps", "ranking.xp-multipliers", "competitive.colors"));
 		update(plugin, "messages.yml", Set.of());
-		update(plugin, "gui.yml", Set.of("maps", "items", "competitive-buttons"));
+		// "menus" belongs to the owner as a whole (their own menus / items); the global settings are kept up to date
+		update(plugin, "guis.yml", Set.of("menus"));
 	}
 
 	/**

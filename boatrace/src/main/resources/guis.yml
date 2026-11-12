@@ -1,0 +1,221 @@
+# BoatRace - menus. Open one with /bre gui <menu> [player]  (e.g. /bre gui unranked, /bre gui ranked Steve).
+# Opening a menu is completely silent: nothing is sent to the chat. Reload with /bre reload.
+#
+# Every menu below is built from items, and EVERY item decides for itself what a click does ("actions").
+# Add your own menus (own id under "menus") and weave any items into them. The default menu of /bre gui is
+# "default-menu". New menus / items of a plugin update are not added to this file by the automatic file update.
+#
+# ---------------------------------------------------------------------------------------------------------------------
+# ITEM (menus.<id>.items.<name>)
+#   slot: 4  or  slots: [0, 8, 9, 17]     where it is (0 = top left). When two items share a slot the LATER one wins.
+#   material, name, lore                   how it looks (& colors)
+#   enabled: false                         switches the item off without deleting it
+#   arena: monaco | random                 the map this item stands for. It gives the lore the placeholders of that map,
+#                                          is the default target of its actions and its boatrace.map.<arena> permission is
+#                                          checked. "random" = the competitive lobby of any map.
+#   permission: some.permission            needed to use the item (message gui.item-no-permission)
+#   requires-competitive: true             only shown while competitive.enabled is true in config.yml
+#   actions: ...                           what a click does (below)
+#
+# ACTIONS - one line each, "name argument". They run in order; an action that is refused (no permission, map closed)
+# stops the rest.
+#   close                          close the menu
+#   open-menu <menu>               open another menu (silent)
+#   join-map [arena]               join the map with the laps chosen in the menu (arena = the item's arena)
+#   ranked-map [arena|random]      join the competitive lobby of the map; clicking again leaves it
+#   random-map [unranked|ranked]   unranked: a random casual map (only maps the player may play, open, with room for the
+#                                  whole party); ranked: the competitive lobby of any map (clicking again leaves it)
+#   laps-increase [arena]          +1 lap for the map (up to the menu's laps.max)
+#   laps-decrease [arena]          -1 lap (down to laps.min)
+#   player-command <command>       run a command as the player
+#   console-command <command>      run a command from the console
+#   message <text>                 send a chat message to the player
+# Placeholders in commands and messages: {player} {uuid} {arena} {laps}.
+# Maps always need the permission boatrace.map.<arena name in lower case>; without it the click does nothing but show
+# gui.no-permission (messages.yml). A closed map (/bre maintenance) is disabled: no joining, no lap changes.
+#
+# MOUSE: "actions" can be per click. Click types: LEFT, RIGHT, SHIFT_LEFT, SHIFT_RIGHT, MIDDLE, DROP, CONTROL_DROP,
+# DOUBLE_CLICK, NUMBER_KEY ... SHIFT = both shift clicks, default = every click that is not listed.
+#   actions:                         actions: close                  (every click)
+#     LEFT: laps-increase            actions: [join-map, close]      (every click, two actions)
+#     RIGHT: laps-decrease
+#     SHIFT: join-map
+#     default: []
+#
+# PLACEHOLDERS in name / lore
+#   any item:      {player} {maps} (maps the random button can pick for this player)
+#   with a map:    {arena} {status} {players} {slots} {laps} {queue} {access} {permission}
+#                  players / slots = racing now / grid positions of the map
+#   ranked item (it has a ranked-map or random-map ranked action): {players} {teams} {min} {max} {countdown} {queued}
+#                  = the competitive lobby of the map; {playing} = racing now
+#   always with an arena / ranked item: {lobby_players} {lobby_teams} {lobby_min} {lobby_max}
+# ---------------------------------------------------------------------------------------------------------------------
+
+default-menu: unranked
+
+# {status} in the lore of a map
+status:
+  free: "&aFree"
+  busy: "&cBusy &7- you will be queued"
+  event: "&eEvent open - join now"
+  not-ready: "&7Not ready"
+  maintenance: "&cClosed - maintenance"
+
+# {access} in the lore of a map
+access:
+  allowed: "&aYou can play this map"
+  denied: "&cYou need &f{permission}"
+
+# A map in maintenance stays in the menu but is disabled: its icon is replaced by this material ("" = keep the icon).
+maintenance:
+  material: BARRIER
+
+menus:
+
+  # ------------------------------------------------------------------------------------------------------------------
+  # Casual races: solo, party, events. Left / right click a map = laps +1 / -1, shift or middle click = join.
+  # ------------------------------------------------------------------------------------------------------------------
+  unranked:
+    title: "&8Select a map"
+    rows: 3                       # 1 - 6
+    laps:
+      min: 1
+      max: 5
+    # permission: boatrace.menu.unranked   # needed to open the menu yourself (optional)
+
+    # Every ready arena that has no item of its own (no item with "arena: <it>") gets this item, in the next free slot
+    # from start-slot on. filter: all | competitive (only arenas with competitive matches).
+    auto-maps:
+      show: true
+      start-slot: 10
+      filter: all
+      material: OAK_BOAT
+      name: "&b&l{arena}"
+      lore:
+        - "&7Status: {status}"
+        - "&7Players: &f{players}&7/&f{slots}"
+        - "&7Laps: &e{laps}"
+        - "&7Queue: &f{queue}"
+        - ""
+        - "{access}"
+        - ""
+        - "&eLeft click &7- laps +1"
+        - "&eRight click &7- laps -1"
+        - "&eShift + click &7- join"
+      actions:
+        LEFT: laps-increase
+        RIGHT: laps-decrease
+        SHIFT: join-map
+        MIDDLE: join-map
+
+    # Empty slots are filled with this item (does nothing).
+    filler:
+      enabled: true
+      material: GRAY_STAINED_GLASS_PANE
+      name: " "
+
+    items:
+      # A map with its own icon / slot (instead of the automatic one). Example:
+      # monaco:
+      #   arena: monaco
+      #   slot: 11
+      #   material: OAK_BOAT
+      #   name: "&b&lMonaco"
+      #   lore:
+      #     - "&7Status: {status}"
+      #     - "&7Laps: &e{laps}"
+      #   actions:
+      #     LEFT: laps-increase
+      #     RIGHT: laps-decrease
+      #     SHIFT: join-map
+      info:
+        slot: 4
+        material: PAPER
+        name: "&e&lHow to play"
+        lore:
+          - "&7Left / right click a map: change the laps"
+          - "&7Shift + click a map: join it"
+          - "&7A busy map puts you in its queue."
+      random:
+        slot: 22
+        material: ENDER_PEARL
+        name: "&d&lRandom map"
+        lore:
+          - "&7Pick a random map you can play."
+          - "&7Maps available to you: &f{maps}"
+          - "&7(open maps with room for your whole party)"
+        actions: random-map unranked
+      ranked:
+        slot: 24
+        requires-competitive: true
+        material: LEATHER_CHESTPLATE
+        name: "&6&lRanked"
+        lore:
+          - "&7Team against team for rating points."
+          - "&eClick &7to open the ranked menu"
+        actions: open-menu ranked
+      close:
+        slot: 26
+        material: BARRIER
+        name: "&c&lClose"
+        actions: close
+
+  # ------------------------------------------------------------------------------------------------------------------
+  # Ranked (competitive) matches: a click joins the lobby of the map, a second click leaves it. A party leader joins
+  # with the whole party as one team. Needs competitive.enabled: true in config.yml.
+  # ------------------------------------------------------------------------------------------------------------------
+  ranked:
+    title: "&8Ranked - select a map"
+    rows: 3
+    requires-competitive: true    # /bre gui ranked says "not enabled" while competitive.enabled is false
+
+    auto-maps:
+      show: true
+      start-slot: 10
+      filter: competitive         # only arenas with competitive matches (/bre compset)
+      material: OAK_BOAT
+      name: "&6&l{arena}"
+      lore:
+        - "&7Lobby: &f{players}&7 racers in &f{teams}&7 teams (&f{min}&7-&f{max}&7)"
+        - "{countdown}"
+        - "{queued}"
+        - ""
+        - "{access}"
+        - ""
+        - "&eClick &7- join the lobby (again = leave)"
+      actions: ranked-map
+
+    filler:
+      enabled: true
+      material: GRAY_STAINED_GLASS_PANE
+      name: " "
+
+    items:
+      info:
+        slot: 4
+        material: PAPER
+        name: "&e&lRanked"
+        lore:
+          - "&7Team against team. Your party = your team,"
+          - "&7alone you race as a team of 1."
+      random:
+        slot: 22
+        arena: random
+        material: ENDER_PEARL
+        name: "&d&lAny map"
+        lore:
+          - "&7Lobby for any competitive map:"
+          - "&f{players}&7 racers in &f{teams}&7 teams (&f{min}&7-&f{max}&7)"
+          - "{countdown}"
+          - "{queued}"
+        actions: random-map ranked
+      back:
+        slot: 18
+        material: ARROW
+        name: "&7Casual maps"
+        actions: open-menu unranked
+      close:
+        slot: 26
+        material: BARRIER
+        name: "&c&lClose"
+        actions: close

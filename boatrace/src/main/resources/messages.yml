@@ -498,6 +498,12 @@ gui:
   # {arena} {permission}
   no-permission: "&cYou do not have permission to play &f{arena}&c. &7({permission})"
   no-random: "&cThere is no map you can play right now."
+  # {menu} {menus} - /bre gui <menu> with a menu that is not in guis.yml
+  unknown-menu: "&cThere is no menu &f{menu}&c. Menus: &f{menus}"
+  # {permission} - needed to open the menu yourself (guis.yml menus.<id>.permission)
+  menu-no-permission: "&cYou do not have permission to open this menu. &7({permission})"
+  # {permission} - an item with a permission (guis.yml items.<id>.permission)
+  item-no-permission: "&cYou do not have permission to use this. &7({permission})"
   # {queued} / {countdown} of the competitive buttons
   comp-queued: "&aYou are in this lobby - click to leave"
   comp-countdown: "&eStarts in &f{seconds}s"

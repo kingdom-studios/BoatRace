@@ -105,7 +105,7 @@ public final class BoatRacePlugin extends SimplePlugin {
 		this.registerEvents(this.tabList);
 		this.tabList.start();
 
-		this.gui = new GuiManager(this, this.arenas, this.races);
+		this.gui = new GuiManager(this, this.arenas, this.races, this.settings);
 		this.gui.load();
 		this.registerEvents(this.gui);
 

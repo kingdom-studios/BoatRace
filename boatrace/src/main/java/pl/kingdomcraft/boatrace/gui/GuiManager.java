@@ -1,21 +1,27 @@
 package pl.kingdomcraft.boatrace.gui;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.logging.Level;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -32,36 +38,36 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import net.kyori.adventure.text.Component;
+import pl.kingdomcraft.boatrace.Settings;
 import pl.kingdomcraft.boatrace.arena.Arena;
 import pl.kingdomcraft.boatrace.arena.ArenaManager;
 import pl.kingdomcraft.boatrace.race.RaceManager;
 import pl.kingdomcraft.boatrace.util.Msg;
 
 /**
- * The map menu (/bre gui), configured entirely in gui.yml: title, size, item slots / materials / names / lore.
+ * The menus (/bre gui &lt;menu&gt; [player]), configured entirely in guis.yml: any number of menus, each made of items
+ * with their own slots, icons, lore and - per mouse click - actions (see {@link GuiAction}). Typical menus: casual
+ * ("unranked") and competitive ("ranked").
  *
- * Maps need the permission boatrace.map.&lt;arena name in lower case&gt;. Clicking a map you may not play does nothing
- * but send gui.no-permission (messages.yml). Configurable clicks change the lap count of the map (default: left +1,
- * right -1, between 1 and 5) and join it (default: shift-click or middle click) - the lap count is also used by the
- * race that is started.
+ * Maps need the permission boatrace.map.&lt;arena name in lower case&gt;. A click on a map the player may not play does
+ * nothing but send gui.no-permission (messages.yml). Opening a menu is silent: nothing is sent to the chat.
  */
 public final class GuiManager implements Listener {
 
-	private enum Type {
-		MAP, RANDOM, CLOSE, TEAM, NONE
+	/** An item as placed in an open menu: the configured item and the map it stands for (an automatic map's arena). */
+	record Bound(GuiItem item, String arena) {
 	}
 
-	private record Action(Type type, String arena) {
-	}
+	/** The holder of every inventory this class opens. */
+	static final class MenuHolder implements InventoryHolder {
 
-	/** An item from gui.yml. */
-	private record Icon(Material material, String name, List<String> lore, List<Integer> slots) {
-	}
-
-	private static final class MenuHolder implements InventoryHolder {
-
-		final Map<Integer, Action> actions = new HashMap<>();
+		final GuiMenu menu;
+		final Map<Integer, Bound> items = new HashMap<>();
 		Inventory inventory;
+
+		MenuHolder(final GuiMenu menu) {
+			this.menu = menu;
+		}
 
 		@Override
 		public Inventory getInventory() {
@@ -69,349 +75,357 @@ public final class GuiManager implements Listener {
 		}
 	}
 
+	/** Who clicked what: what the actions of one click work with. */
+	private record Context(Player player, MenuHolder holder, String arena) {
+	}
+
 	private final JavaPlugin plugin;
 	private final ArenaManager arenas;
 	private final RaceManager races;
+	private final Settings settings;
 
 	/** player -> arena name (lower case) -> chosen laps */
 	private final Map<UUID, Map<String, Integer>> chosenLaps = new HashMap<>();
 
-	// --- gui.yml ---
-	private String title = "&8Select a map";
-	private int size = 27;
-	private int lapsMin = 1;
-	private int lapsMax = 5;
-	private Set<String> clickIncrease = Set.of("LEFT");
-	private Set<String> clickDecrease = Set.of("RIGHT");
-	private Set<String> clickJoin = Set.of("SHIFT_LEFT", "SHIFT_RIGHT", "MIDDLE");
-	private final Map<RaceManager.ArenaStatus, String> statusText = new HashMap<>();
-	/** replaces the icon material of a map in maintenance; null = keep the icon */
-	private Material maintenanceMaterial = Material.BARRIER;
-	private String accessAllowed = "&aYou can play this map";
-	private String accessDenied = "&cYou need &f{permission}";
-	private final Map<String, Icon> mapIcons = new LinkedHashMap<>();
-	private boolean showUnlisted = true;
-	private int unlistedStartSlot = 10;
-	private Icon unlisted;
-	private Icon random;
-	private Icon close;
-	private Icon filler;
-	private final List<Icon> decorations = new ArrayList<>();
+	private GuiConfig config = new GuiConfig();
 
-	/** A button of gui.yml "competitive-buttons": join the competitive lobby of one arena or of any (arena null). */
-	private record CompButton(Icon icon, String arena) {
-	}
+	/** Resolves the material names of guis.yml. A field only so the tests can run without the server's item registry. */
+	java.util.function.Function<String, Material> materials = GuiManager::material;
 
-	private final List<CompButton> compButtons = new ArrayList<>();
+	/** Creates the item of a menu slot. A field for the same reason as {@link #materials}. */
+	java.util.function.Function<Material, ItemStack> stacks = ItemStack::new;
 
-	public GuiManager(final JavaPlugin plugin, final ArenaManager arenas, final RaceManager races) {
+	public GuiManager(final JavaPlugin plugin, final ArenaManager arenas, final RaceManager races, final Settings settings) {
 		this.plugin = plugin;
 		this.arenas = arenas;
 		this.races = races;
+		this.settings = settings;
 	}
 
-	/** The permission needed to play (and open from the menu) an arena. */
+	/** The permission needed to play (and join from a menu) an arena. */
 	public static String permission(final Arena arena) {
 		return "boatrace.map." + arena.getName().toLowerCase(Locale.ROOT);
 	}
 
 	// ------------------------------------------------------------------------------------------
-	// gui.yml
+	// guis.yml
 	// ------------------------------------------------------------------------------------------
 
+	/** (Re)loads guis.yml. A file with an error keeps the previous menus. */
 	public void load() {
-		final File file = new File(this.plugin.getDataFolder(), "gui.yml");
+		final File file = new File(this.plugin.getDataFolder(), "guis.yml");
 
 		if (!file.exists())
-			this.plugin.saveResource("gui.yml", false);
+			this.createFile(file);
 
-		final YamlConfiguration c = YamlConfiguration.loadConfiguration(file);
+		final YamlConfiguration yaml = new YamlConfiguration();
 
-		this.title = c.getString("title", "&8Select a map");
-		this.size = Math.max(1, Math.min(6, c.getInt("rows", 3))) * 9;
-		this.lapsMin = Math.max(1, c.getInt("laps.min", 1));
-		this.lapsMax = Math.max(this.lapsMin, c.getInt("laps.max", 5));
+		try {
+			yaml.load(file);
 
-		this.clickIncrease = clicks(c, "clicks.laps-increase", "LEFT");
-		this.clickDecrease = clicks(c, "clicks.laps-decrease", "RIGHT");
-		this.clickJoin = clicks(c, "clicks.join", "SHIFT_LEFT", "SHIFT_RIGHT", "MIDDLE");
-
-		this.statusText.put(RaceManager.ArenaStatus.FREE, c.getString("status.free", "&aFree"));
-		this.statusText.put(RaceManager.ArenaStatus.BUSY, c.getString("status.busy", "&cBusy"));
-		this.statusText.put(RaceManager.ArenaStatus.EVENT, c.getString("status.event", "&eEvent - open for joining"));
-		this.statusText.put(RaceManager.ArenaStatus.NOT_READY, c.getString("status.not-ready", "&7Not ready"));
-		this.statusText.put(RaceManager.ArenaStatus.MAINTENANCE, c.getString("status.maintenance", "&cClosed - maintenance"));
-
-		final String maintenance = c.getString("maintenance.material", "BARRIER");
-		final Material maintenanceItem = maintenance == null || maintenance.isBlank() ? null : Material.matchMaterial(maintenance);
-
-		this.maintenanceMaterial = maintenanceItem != null && maintenanceItem.isItem() ? maintenanceItem : null;
-		this.accessAllowed = c.getString("access.allowed", this.accessAllowed);
-		this.accessDenied = c.getString("access.denied", this.accessDenied);
-
-		this.mapIcons.clear();
-
-		final ConfigurationSection maps = c.getConfigurationSection("maps");
-
-		if (maps != null)
-			for (final String arena : maps.getKeys(false)) {
-				final Icon icon = this.icon(maps.getConfigurationSection(arena), "&b&l{arena}");
-
-				if (icon != null)
-					this.mapIcons.put(arena.toLowerCase(Locale.ROOT), icon);
-			}
-
-		final ConfigurationSection unlistedSection = c.getConfigurationSection("unlisted-maps");
-
-		this.showUnlisted = unlistedSection == null || unlistedSection.getBoolean("show", true);
-		this.unlistedStartSlot = unlistedSection == null ? 10 : unlistedSection.getInt("start-slot", 10);
-		this.unlisted = this.icon(unlistedSection, "&b&l{arena}");
-
-		this.random = c.getBoolean("random.enabled", true) ? this.icon(c.getConfigurationSection("random"), "&d&lRandom map") : null;
-		this.close = c.getBoolean("close.enabled", true) ? this.icon(c.getConfigurationSection("close"), "&c&lClose") : null;
-		this.filler = c.getBoolean("filler.enabled", false) ? this.icon(c.getConfigurationSection("filler"), " ") : null;
-
-		this.decorations.clear();
-
-		final ConfigurationSection items = c.getConfigurationSection("items");
-
-		if (items != null)
-			for (final String key : items.getKeys(false)) {
-				final Icon icon = this.icon(items.getConfigurationSection(key), " ");
-
-				if (icon != null)
-					this.decorations.add(icon);
-			}
-
-		this.compButtons.clear();
-
-		final ConfigurationSection buttons = c.getConfigurationSection("competitive-buttons");
-
-		if (buttons != null)
-			for (final String key : buttons.getKeys(false)) {
-				final ConfigurationSection section = buttons.getConfigurationSection(key);
-
-				if (section == null || !section.getBoolean("enabled", true))
-					continue;
-
-				final Icon icon = this.icon(section, "&6&lCompetitive");
-				final String arena = section.getString("arena", "random");
-
-				if (icon != null)
-					this.compButtons.add(new CompButton(icon, "random".equalsIgnoreCase(arena) ? null : arena));
-			}
-	}
-
-	private static Set<String> clicks(final YamlConfiguration c, final String path, final String... defaults) {
-		final Set<String> result = new HashSet<>();
-
-		for (final String raw : c.getStringList(path))
-			result.add(raw.trim().toUpperCase(Locale.ROOT));
-
-		return result.isEmpty() ? new HashSet<>(Arrays.asList(defaults)) : result;
-	}
-
-	/** Reads material / name / lore / slot(s) of an item section; null when the section is missing. */
-	private Icon icon(final ConfigurationSection section, final String defaultName) {
-		if (section == null)
-			return null;
-
-		Material material = Material.matchMaterial(section.getString("material", "STONE"));
-
-		if (material == null || !material.isItem()) {
-			this.plugin.getLogger().warning("gui.yml: unknown material '" + section.getString("material") + "' in " + section.getCurrentPath() + " - using STONE.");
-			material = Material.STONE;
+		} catch (final IOException | InvalidConfigurationException ex) {
+			this.plugin.getLogger().log(Level.WARNING, "guis.yml could not be read - the menus keep their previous setup.", ex);
+			return;
 		}
 
-		final List<Integer> slots = new ArrayList<>();
+		this.config = GuiConfig.parse(yaml, this.materials, text -> this.plugin.getLogger().warning("guis.yml " + text));
+	}
 
-		if (section.isList("slots"))
-			slots.addAll(section.getIntegerList("slots"));
-		else if (section.contains("slot"))
-			slots.add(section.getInt("slot"));
+	private static Material material(final String raw) {
+		final Material material = Material.matchMaterial(raw);
 
-		return new Icon(material, section.getString("name", defaultName), section.getStringList("lore"), slots);
+		return material != null && material.isItem() ? material : null;
+	}
+
+	/** First start: an old gui.yml is converted (nothing of it is lost), otherwise the default guis.yml is written. */
+	private void createFile(final File target) {
+		final File legacy = new File(this.plugin.getDataFolder(), "gui.yml");
+
+		if (legacy.exists() && this.migrate(legacy, target))
+			return;
+
+		this.plugin.saveResource("guis.yml", false);
+	}
+
+	private boolean migrate(final File legacy, final File target) {
+		try {
+			final YamlConfiguration old = new YamlConfiguration();
+
+			old.load(legacy);
+
+			final YamlConfiguration defaults = new YamlConfiguration();
+
+			try (InputStream in = this.plugin.getResource("guis.yml")) {
+				if (in != null)
+					defaults.load(new InputStreamReader(in, StandardCharsets.UTF_8));
+			}
+
+			final YamlConfiguration converted = GuiMigration.convert(old, defaults.getConfigurationSection("menus.ranked"));
+
+			converted.options().width(Integer.MAX_VALUE);
+			converted.options().setHeader(List.of(
+					"BoatRace menus - created from your old gui.yml (the old file is kept as gui.yml.migrated).",
+					"Your menu is now \"unranked\"; the \"ranked\" menu is new. Every item has its own actions - see the default",
+					"guis.yml of the plugin (documentation at the top) or the README. Open a menu: /bre gui <menu> [player]"));
+			converted.save(target);
+
+			Files.move(legacy.toPath(), new File(this.plugin.getDataFolder(), "gui.yml.migrated").toPath(), StandardCopyOption.REPLACE_EXISTING);
+
+			this.plugin.getLogger().info("gui.yml was converted to guis.yml (menu \"unranked\" = your old menu, new menu \"ranked\"); the old file is now gui.yml.migrated.");
+
+			return true;
+
+		} catch (final IOException | InvalidConfigurationException ex) {
+			this.plugin.getLogger().log(Level.WARNING, "Could not convert gui.yml to guis.yml - the default guis.yml is used (gui.yml is untouched).", ex);
+
+			return false;
+		}
+	}
+
+	public boolean hasMenu(final String id) {
+		return this.config.menus.containsKey(id.toLowerCase(Locale.ROOT));
+	}
+
+	public Set<String> menuIds() {
+		return this.config.menus.keySet();
+	}
+
+	public String defaultMenu() {
+		return this.config.defaultMenu;
 	}
 
 	// ------------------------------------------------------------------------------------------
-	// Opening / rendering
+	// Opening
 	// ------------------------------------------------------------------------------------------
 
-	public void open(final Player player) {
-		final MenuHolder holder = new MenuHolder();
-		final Inventory inventory = Bukkit.createInventory(holder, this.size, Msg.c(this.title));
+	/** The default menu for the player. */
+	public boolean open(final Player player) {
+		return this.open(player, this.config.defaultMenu, player);
+	}
 
-		holder.inventory = inventory;
+	/**
+	 * Opens the menu for {@code viewer}. Silent on success - nothing is sent to anybody. A refusal (unknown menu,
+	 * competitive matches off, no permission to open it) is reported to {@code requester}.
+	 *
+	 * @param requester who asked: the viewer themselves, or an admin / the console (who may open every menu)
+	 * @return whether the menu was opened
+	 */
+	public boolean open(final Player viewer, final String menuId, final CommandSender requester) {
+		final GuiMenu menu = this.config.menus.get(menuId.toLowerCase(Locale.ROOT));
 
-		this.render(player, holder);
-		player.openInventory(inventory);
+		if (menu == null) {
+			Msg.send(requester, "gui.unknown-menu", "menu", menuId, "menus", String.join(", ", this.config.menus.keySet()));
+			return false;
+		}
+
+		if (menu.requiresCompetitive() && !this.settings.compEnabled) {
+			Msg.send(requester, "comp.disabled");
+			return false;
+		}
+
+		if (menu.permission() != null && requester == viewer && !viewer.hasPermission(menu.permission())) {
+			Msg.send(viewer, "gui.menu-no-permission", "permission", menu.permission());
+			return false;
+		}
+
+		final MenuHolder holder = new MenuHolder(menu);
+
+		holder.inventory = Bukkit.createInventory(holder, menu.size(), Msg.c(menu.title()));
+
+		this.render(viewer, holder);
+		viewer.openInventory(holder.inventory);
+
+		return true;
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Rendering
+	// ------------------------------------------------------------------------------------------
+
+	private boolean visible(final GuiItem item) {
+		if (item.requiresCompetitive() && !this.settings.compEnabled)
+			return false;
+
+		// an item of a map that does not exist (any more) is not shown
+		return item.arena() == null || "random".equalsIgnoreCase(item.arena()) || this.arenas.get(item.arena()) != null;
 	}
 
 	private void render(final Player player, final MenuHolder holder) {
+		final GuiMenu menu = holder.menu;
 		final Inventory inventory = holder.inventory;
+		final int size = menu.size();
 
 		inventory.clear();
-		holder.actions.clear();
+		holder.items.clear();
 
-		// everything with a configured slot keeps it; automatically placed maps use the remaining ones
+		// items keep their configured slots; automatically added maps use the ones that stay free
 		final Set<Integer> reserved = new HashSet<>();
+		final List<GuiItem> shown = new ArrayList<>();
 
-		for (final Icon icon : this.mapIcons.values())
-			reserved.addAll(icon.slots());
+		for (final GuiItem item : menu.items())
+			if (this.visible(item)) {
+				shown.add(item);
+				reserved.addAll(item.slots());
+			}
 
-		for (final Icon icon : this.decorations)
-			reserved.addAll(icon.slots());
+		// file order: when two items share a slot the later one wins
+		for (final GuiItem item : shown)
+			this.place(player, holder, item, item.arena(), item.slots());
 
-		if (this.random != null)
-			reserved.addAll(this.random.slots());
+		final GuiMenu.AutoMaps auto = menu.autoMaps();
 
-		if (this.close != null)
-			reserved.addAll(this.close.slots());
+		if (auto != null) {
+			final Set<String> own = new HashSet<>();
 
-		final pl.kingdomcraft.boatrace.Settings settings = pl.kingdomcraft.boatrace.BoatRacePlugin.getInstance().getSettings();
-		final List<CompButton> visibleComp = new ArrayList<>();
+			for (final GuiItem item : menu.items())
+				if (item.arena() != null)
+					own.add(item.arena().toLowerCase(Locale.ROOT));
 
-		// only with competitive.enabled, and an arena button only for an arena that exists
-		if (settings.compEnabled)
-			for (final CompButton button : this.compButtons)
-				if (button.arena() == null || this.arenas.get(button.arena()) != null) {
-					visibleComp.add(button);
-					reserved.addAll(button.icon().slots());
-				}
-
-		// 1) decoration (does nothing), 2) functional buttons on top of it
-		for (final Icon icon : this.decorations)
-			this.place(inventory, holder, icon.slots(), this.build(icon, new Object[0]), new Action(Type.NONE, null));
-
-		if (this.close != null)
-			this.place(inventory, holder, this.close.slots(), this.build(this.close, new Object[0]), new Action(Type.CLOSE, null));
-
-		if (this.random != null)
-			this.place(inventory, holder, this.random.slots(), this.build(this.random, this.randomPlaceholders(player)), new Action(Type.RANDOM, null));
-
-		for (final CompButton button : visibleComp) {
-			final RaceManager.CompLobbyInfo lobby = this.races.competitiveLobby(button.arena());
-
-			this.place(inventory, holder, button.icon().slots(), this.build(button.icon(), new Object[] {
-					"arena", lobby.arena(),
-					"players", lobby.players(),
-					"teams", lobby.teams(),
-					"min", lobby.min(),
-					"max", lobby.max(),
-					"countdown", lobby.countdown() >= 0 ? Msg.text("gui.comp-countdown", "seconds", lobby.countdown()) : "",
-					"queued", this.races.isInCompetitiveQueue(player.getUniqueId()) ? Msg.text("gui.comp-queued") : ""
-			}), new Action(Type.TEAM, button.arena() != null ? button.arena() : ""));
-		}
-
-		for (final Map.Entry<String, Icon> entry : this.mapIcons.entrySet()) {
-			final Arena arena = this.arenas.get(entry.getKey());
-
-			if (arena != null)
-				this.place(inventory, holder, entry.getValue().slots(), this.build(this.iconOf(arena, entry.getValue()), this.mapPlaceholders(player, arena)), new Action(Type.MAP, arena.getName()));
-		}
-
-		if (this.showUnlisted && this.unlisted != null) {
 			final List<Arena> rest = new ArrayList<>();
 
 			for (final Arena arena : this.arenas.readyArenas())
-				if (!this.mapIcons.containsKey(arena.getName().toLowerCase(Locale.ROOT)))
+				if (!own.contains(arena.getName().toLowerCase(Locale.ROOT)) && ("all".equals(auto.filter()) || arena.isCompetitive()))
 					rest.add(arena);
 
 			rest.sort(Comparator.comparing(Arena::getName, String.CASE_INSENSITIVE_ORDER));
 
-			int slot = Math.max(0, this.unlistedStartSlot);
+			int slot = auto.startSlot();
 
 			for (final Arena arena : rest) {
-				while (slot < this.size && (reserved.contains(slot) || holder.actions.containsKey(slot)))
+				while (slot < size && (reserved.contains(slot) || holder.items.containsKey(slot)))
 					slot++;
 
-				if (slot >= this.size)
+				if (slot >= size)
 					break;
 
-				this.place(inventory, holder, List.of(slot), this.build(this.iconOf(arena, this.unlisted), this.mapPlaceholders(player, arena)), new Action(Type.MAP, arena.getName()));
+				this.place(player, holder, auto.template(), arena.getName(), List.of(slot));
 			}
 		}
 
-		if (this.filler != null)
-			for (int slot = 0; slot < this.size; slot++)
+		if (menu.filler() != null) {
+			final ItemStack filler = this.build(player, holder, menu.filler(), null);
+
+			for (int slot = 0; slot < size; slot++)
 				if (inventory.getItem(slot) == null)
-					inventory.setItem(slot, this.build(this.filler, new Object[0]));
+					inventory.setItem(slot, filler);
+		}
 	}
 
-	private void place(final Inventory inventory, final MenuHolder holder, final List<Integer> slots, final ItemStack item, final Action action) {
+	private void place(final Player player, final MenuHolder holder, final GuiItem item, final String arenaName, final List<Integer> slots) {
+		final ItemStack stack = this.build(player, holder, item, arenaName);
+
 		for (final int slot : slots)
-			if (slot >= 0 && slot < this.size) {
-				inventory.setItem(slot, item);
-				holder.actions.put(slot, action);
+			if (slot >= 0 && slot < holder.menu.size()) {
+				holder.inventory.setItem(slot, stack);
+				holder.items.put(slot, new Bound(item, arenaName));
 			}
 	}
 
-	/** A map in maintenance is shown disabled: with the maintenance material instead of its icon. */
-	private Icon iconOf(final Arena arena, final Icon icon) {
-		if (!arena.isMaintenance() || this.maintenanceMaterial == null)
-			return icon;
+	private ItemStack build(final Player player, final MenuHolder holder, final GuiItem item, final String arenaName) {
+		final Arena arena = this.arenaOf(arenaName);
+		Material material = item.material();
 
-		return new Icon(this.maintenanceMaterial, icon.name(), icon.lore(), icon.slots());
+		// a map in maintenance is shown disabled
+		if (arena != null && arena.isMaintenance() && this.config.maintenanceMaterial != null)
+			material = this.config.maintenanceMaterial;
+
+		final Object[] placeholders = this.placeholders(player, holder.menu, item, arenaName, arena);
+		final ItemStack stack = this.stacks.apply(material);
+		final ItemMeta meta = stack.getItemMeta();
+		final List<Component> lore = new ArrayList<>();
+
+		for (final String line : item.lore())
+			lore.add(Msg.item(Msg.apply(line, placeholders)));
+
+		meta.displayName(Msg.item(Msg.apply(item.name(), placeholders)));
+		meta.lore(lore.isEmpty() ? null : lore);
+		meta.addItemFlags(ItemFlag.values());
+		stack.setItemMeta(meta);
+
+		return stack;
 	}
 
-	private Object[] mapPlaceholders(final Player player, final Arena arena) {
-		final String permission = permission(arena);
-
-		return new Object[] {
-				"arena", arena.getName(),
-				"status", this.statusText.getOrDefault(this.races.statusOf(arena), ""),
-				"players", this.races.playingCount(arena.getName()),
-				"slots", this.races.capacityOf(arena),
-				"laps", this.lapsOf(player, arena),
-				"queue", this.races.queueSize(arena),
-				"permission", permission,
-				"access", Msg.apply(player.hasPermission(permission) ? this.accessAllowed : this.accessDenied, "permission", permission)
-		};
+	/** The arena an item or action name refers to; null for no map and for "random". */
+	private Arena arenaOf(final String name) {
+		return name == null || "random".equalsIgnoreCase(name) ? null : this.arenas.get(name);
 	}
 
-	private Object[] randomPlaceholders(final Player player) {
+	private Object[] placeholders(final Player player, final GuiMenu menu, final GuiItem item, final String arenaName, final Arena arena) {
+		final List<Object> ph = new ArrayList<>();
+		final boolean ranked = item.isRanked();
+
+		ph.add("player");
+		ph.add(player.getName());
+		ph.add("maps");
+		ph.add(this.randomChoices(player));
+		ph.add("playing");
+		ph.add(arena != null ? this.races.playingCount(arena.getName()) : this.races.playingCount());
+
+		RaceManager.CompLobbyInfo lobby = null;
+
+		// the competitive lobby of the map ("random" / ranked item without a map = the lobby for any map)
+		if (ranked || arenaName != null)
+			lobby = this.races.competitiveLobby(arena != null ? arena.getName() : null);
+
+		if (lobby != null) {
+			final String countdown = lobby.countdown() >= 0 ? Msg.text("gui.comp-countdown", "seconds", lobby.countdown()) : "";
+			final String queued = this.races.isInCompetitiveQueue(player.getUniqueId()) ? Msg.text("gui.comp-queued") : "";
+
+			ph.addAll(List.of("lobby_players", lobby.players(), "lobby_teams", lobby.teams(), "lobby_min", lobby.min(), "lobby_max", lobby.max(),
+					"lobby_countdown", countdown, "lobby_queued", queued));
+
+			if (ranked)
+				ph.addAll(List.of("players", lobby.players(), "teams", lobby.teams(), "min", lobby.min(), "max", lobby.max(), "countdown", countdown, "queued", queued));
+		}
+
+		if (arena != null) {
+			final String permission = permission(arena);
+			final String status = this.config.status.getOrDefault(this.races.statusOf(arena).name().toLowerCase(Locale.ROOT).replace('_', '-'), "");
+
+			ph.addAll(List.of("arena", arena.getName(), "status", status, "slots", this.races.capacityOf(arena), "laps", this.lapsOf(player, arena, menu),
+					"queue", this.races.queueSize(arena), "permission", permission,
+					"access", Msg.apply(player.hasPermission(permission) ? this.config.accessAllowed : this.config.accessDenied, "permission", permission)));
+
+			if (!ranked)
+				ph.addAll(List.of("players", this.races.playingCount(arena.getName())));
+
+		} else {
+			ph.addAll(List.of("arena", lobby != null ? lobby.arena() : ""));
+
+			if (!ranked)
+				ph.addAll(List.of("players", this.races.playingCount()));
+		}
+
+		return ph.toArray();
+	}
+
+	/** The maps the random button can pick for this player: open, permitted, with room for the whole party. */
+	private int randomChoices(final Player player) {
 		int maps = 0;
 		final int size = this.races.groupSize(player);
 
-		// the maps the random button can really pick: open, permitted, with a grid position for the whole party
 		for (final Arena arena : this.arenas.readyArenas())
 			if (!arena.isMaintenance() && arena.getSpawns().size() >= size && player.hasPermission(permission(arena)))
 				maps++;
 
-		return new Object[] { "maps", maps, "players", this.races.playingCount() };
-	}
-
-	private ItemStack build(final Icon icon, final Object[] placeholders) {
-		final ItemStack item = new ItemStack(icon.material());
-		final ItemMeta meta = item.getItemMeta();
-		final List<Component> lore = new ArrayList<>();
-
-		for (final String line : icon.lore())
-			lore.add(Msg.item(Msg.apply(line, placeholders)));
-
-		meta.displayName(Msg.item(Msg.apply(icon.name(), placeholders)));
-		meta.lore(lore.isEmpty() ? null : lore);
-		meta.addItemFlags(ItemFlag.values());
-		item.setItemMeta(meta);
-
-		return item;
+		return maps;
 	}
 
 	// ------------------------------------------------------------------------------------------
 	// Laps
 	// ------------------------------------------------------------------------------------------
 
-	/** The chosen laps of the player for the map, by default the laps configured for the arena (within the GUI limits). */
-	private int lapsOf(final Player player, final Arena arena) {
+	/** The chosen laps of the player for the map, by default the laps configured for the arena (within the menu's limits). */
+	private int lapsOf(final Player player, final Arena arena, final GuiMenu menu) {
 		final Map<String, Integer> chosen = this.chosenLaps.get(player.getUniqueId());
 		final Integer value = chosen == null ? null : chosen.get(arena.getName().toLowerCase(Locale.ROOT));
 
-		return Math.max(this.lapsMin, Math.min(this.lapsMax, value != null ? value : arena.getLaps()));
+		return Math.max(menu.lapsMin(), Math.min(menu.lapsMax(), value != null ? value : arena.getLaps()));
 	}
 
 	private void changeLaps(final Player player, final Arena arena, final int delta, final MenuHolder holder) {
-		final int current = this.lapsOf(player, arena);
-		final int updated = Math.max(this.lapsMin, Math.min(this.lapsMax, current + delta));
+		final int current = this.lapsOf(player, arena, holder.menu);
+		final int updated = Math.max(holder.menu.lapsMin(), Math.min(holder.menu.lapsMax(), current + delta));
 
 		if (updated == current)
 			return;
@@ -435,78 +449,158 @@ public final class GuiManager implements Listener {
 		if (event.getClickedInventory() != event.getInventory() || !(event.getWhoClicked() instanceof final Player player))
 			return;
 
-		final Action action = holder.actions.get(event.getSlot());
+		this.click(player, holder, event.getSlot(), event.getClick().name());
+	}
 
-		if (action == null)
+	/** Runs the actions the item in {@code slot} has for this click type. */
+	void click(final Player player, final MenuHolder holder, final int slot, final String click) {
+		final Bound bound = holder.items.get(slot);
+
+		if (bound == null)
 			return;
 
+		final GuiItem item = bound.item();
+
+		if (item.permission() != null && !player.hasPermission(item.permission())) {
+			Msg.send(player, "gui.item-no-permission", "permission", item.permission());
+			return;
+		}
+
+		final Context context = new Context(player, holder, bound.arena());
+
+		// a refused action (no permission, map closed ...) stops the ones after it
+		for (final GuiAction action : item.actionsFor(click))
+			if (!this.run(context, action))
+				break;
+	}
+
+	/** @return false when the action was refused / could not work and the rest of the click must not run */
+	private boolean run(final Context ctx, final GuiAction action) {
+		final Player player = ctx.player();
+
 		switch (action.type()) {
-			case CLOSE -> Bukkit.getScheduler().runTask(this.plugin, (Runnable) player::closeInventory);
-			case RANDOM -> this.clickRandom(player);
-			case MAP -> this.clickMap(player, action.arena(), event.getClick().name(), holder);
-			case TEAM -> this.clickCompetitive(player, action.arena());
+			case CLOSE -> {
+				Bukkit.getScheduler().runTask(this.plugin, (Runnable) player::closeInventory);
+
+				return true;
+			}
+			case OPEN_MENU -> {
+				if (!this.hasMenu(action.argument())) {
+					this.plugin.getLogger().warning("guis.yml: open-menu '" + action.argument() + "' - there is no such menu.");
+					return false;
+				}
+
+				// next tick - never switch inventories inside the click event
+				Bukkit.getScheduler().runTask(this.plugin, () -> {
+					if (player.isOnline())
+						this.open(player, action.argument(), player);
+				});
+
+				return true;
+			}
+			case JOIN_MAP -> {
+				final Arena arena = this.target(ctx, action);
+
+				if (arena == null || !this.allowed(player, arena))
+					return false;
+
+				this.joinFromMenu(player, arena, this.lapsOf(player, arena, ctx.holder().menu));
+
+				return true;
+			}
+			case RANKED_MAP -> {
+				final String name = action.argument().isEmpty() ? ctx.arena() : action.argument();
+				final Arena arena = this.arenaOf(name);
+
+				// "random" / no map = the lobby for any map; a map that does not exist does nothing
+				if (arena == null && name != null && !"random".equalsIgnoreCase(name))
+					return false;
+
+				if (arena != null && !this.allowed(player, arena))
+					return false;
+
+				this.toggleCompetitive(player, arena);
+
+				return true;
+			}
+			case RANDOM_MAP -> {
+				if ("ranked".equals(action.argument())) {
+					this.toggleCompetitive(player, null);
+					return true;
+				}
+
+				return this.joinRandom(player);
+			}
+			case LAPS_INCREASE, LAPS_DECREASE -> {
+				final Arena arena = this.target(ctx, action);
+
+				if (arena == null || !this.allowed(player, arena))
+					return false;
+
+				this.changeLaps(player, arena, action.type() == GuiAction.Type.LAPS_INCREASE ? 1 : -1, ctx.holder());
+
+				return true;
+			}
+			case PLAYER_COMMAND, CONSOLE_COMMAND -> {
+				final String command = this.fill(ctx, action.argument());
+				final String line = command.startsWith("/") ? command.substring(1) : command;
+
+				Bukkit.getScheduler().runTask(this.plugin, () -> {
+					if (action.type() == GuiAction.Type.PLAYER_COMMAND) {
+						if (player.isOnline())
+							Bukkit.dispatchCommand(player, line);
+
+					} else
+						Bukkit.dispatchCommand(Bukkit.getConsoleSender(), line);
+				});
+
+				return true;
+			}
+			case MESSAGE -> {
+				player.sendMessage(Msg.c(this.fill(ctx, action.argument())));
+
+				return true;
+			}
 			default -> {
+				return false;
 			}
 		}
 	}
 
-	private void clickMap(final Player player, final String arenaName, final String click, final MenuHolder holder) {
-		final Arena arena = this.arenas.get(arenaName);
+	/** The map an action works on: its own argument, otherwise the map of the item. Null = none, "random" or unknown. */
+	private Arena target(final Context ctx, final GuiAction action) {
+		return this.arenaOf(action.argument().isEmpty() ? ctx.arena() : action.argument());
+	}
 
-		if (arena == null) {
-			this.render(player, holder);
-			return;
-		}
-
-		// a map without the permission blocks every action on it
+	/** The permission + maintenance gate of every action on a map; tells the player when it refuses. */
+	private boolean allowed(final Player player, final Arena arena) {
 		if (!player.hasPermission(permission(arena))) {
 			Msg.send(player, "gui.no-permission", "arena", arena.getName(), "permission", permission(arena));
-			return;
+			return false;
 		}
 
-		// closed maps are disabled: no joining and no lap changes
+		// a closed map is disabled: no joining, no lap changes
 		if (arena.isMaintenance()) {
 			Msg.send(player, "race.maintenance", "arena", arena.getName());
-			return;
+			return false;
 		}
 
-		if (this.clickJoin.contains(click))
-			this.joinFromMenu(player, arena, this.lapsOf(player, arena));
-
-		else if (this.clickIncrease.contains(click))
-			this.changeLaps(player, arena, 1, holder);
-
-		else if (this.clickDecrease.contains(click))
-			this.changeLaps(player, arena, -1, holder);
+		return true;
 	}
 
-	/** @param arenaName arena of the button, empty = any */
-	private void clickCompetitive(final Player player, final String arenaName) {
-		final Arena arena = arenaName.isEmpty() ? null : this.arenas.get(arenaName);
+	/** {player} {uuid} {arena} {laps} in commands / messages of guis.yml. */
+	private String fill(final Context ctx, final String text) {
+		final Arena arena = this.arenaOf(ctx.arena());
 
-		if (!arenaName.isEmpty() && arena == null)
-			return;
-
-		if (arena != null && !player.hasPermission(permission(arena))) {
-			Msg.send(player, "gui.no-permission", "arena", arena.getName(), "permission", permission(arena));
-			return;
-		}
-
-		Bukkit.getScheduler().runTask(this.plugin, () -> {
-			player.closeInventory();
-
-			// a second click leaves the lobby again
-			if (this.races.isInCompetitiveQueue(player.getUniqueId())) {
-				this.races.leaveCompetitive(player);
-				Msg.send(player, "comp.queue-left");
-
-			} else
-				this.races.joinCompetitive(player, arena);
-		});
+		return Msg.apply(text,
+				"player", ctx.player().getName(),
+				"uuid", ctx.player().getUniqueId(),
+				"arena", arena != null ? arena.getName() : "",
+				"laps", arena != null ? this.lapsOf(ctx.player(), arena, ctx.holder().menu) : 1);
 	}
 
-	private void clickRandom(final Player player) {
-		// open maps only, and - for a party leader - only maps with a grid position for every member
+	/** A random casual map: open, permitted, with a grid position for every party member. */
+	private boolean joinRandom(final Player player) {
 		final Arena arena = this.races.pickRandomReadyArena(player, candidate -> player.hasPermission(permission(candidate)));
 
 		if (arena == null) {
@@ -515,10 +609,12 @@ public final class GuiManager implements Listener {
 			else
 				Msg.send(player, "gui.no-random");
 
-			return;
+			return false;
 		}
 
 		this.joinFromMenu(player, arena, null);
+
+		return true;
 	}
 
 	/** Closes the menu and joins on the next tick (never open / close inventories inside the click event). */
@@ -528,6 +624,20 @@ public final class GuiManager implements Listener {
 
 			if (player.isOnline())
 				this.races.join(player, arena, laps);
+		});
+	}
+
+	/** Joins the competitive lobby of the map (null = any map); a second click leaves it again. */
+	private void toggleCompetitive(final Player player, final Arena arena) {
+		Bukkit.getScheduler().runTask(this.plugin, () -> {
+			player.closeInventory();
+
+			if (this.races.isInCompetitiveQueue(player.getUniqueId())) {
+				this.races.leaveCompetitive(player);
+				Msg.send(player, "comp.queue-left");
+
+			} else
+				this.races.joinCompetitive(player, arena);
 		});
 	}
 

@@ -48,13 +48,13 @@ Admin (`boatrace.admin`):
 | `reward <arena> <once\|always\|none> [command]` | Finish reward (see below). Also `reward <arena> clear\|info`. |
 | `info <arena>` | Shows the arena setup. |
 | `admin time add\|remove <player> <time> [arena]`, `admin time reset <player> [arena]`, `admin blacklist <player>` | Time / ban management. |
-| `gui <player>` | Opens the map menu for another player (NPCs, hub signs, console). `/bre gui` without a name is for everybody. |
+| `gui [menu] [player]` | Opens a menu (`unranked`, `ranked`, your own - see Menus) silently. `/bre gui` and `/bre gui <menu>` are for everybody; a `[player]` (NPCs, hub signs, command blocks, console) needs `boatrace.admin`. `/bre gui <player>` opens the default menu for that player. |
 | `spectate <player\|arena\|off>` | Spectator mode attached to a racer, or to a racer on that map; `off` returns you. |
-| `maintenance <arena> <true\|false>` | Closes / opens a map for players: it stays in the menu but disabled (`gui.yml` `maintenance:`), is never picked by random, a join shows `race.maintenance`, its queue is cancelled. Races already running finish; admins (`boatrace.admin`) can still join with `/bre join <arena>`. Also shown in `list` / `info`. |
+| `maintenance <arena> <true\|false>` | Closes / opens a map for players: it stays in the menu but disabled (`guis.yml` `maintenance:`), is never picked by random, a join shows `race.maintenance`, its queue is cancelled. Races already running finish; admins (`boatrace.admin`) can still join with `/bre join <arena>`. Also shown in `list` / `info`. |
 | `tracks` | Track ids for the website stats (`fastest_<track>`) -> arena; warns about duplicates. |
 | `ranked <arena\|random> [player]`, `ranked leave\|list` | Competitive lobby (everybody; `[player]` needs `boatrace.join.others`). Aliases `competitive`, `comp`. |
 | `compset <arena> on\|off\|min <n>\|max <n>\|reset\|info` | Competitive settings of an arena (min = countdown starts, max = start at once, never above the grid positions). |
-| `reload` | Reloads config.yml, messages.yml, gui.yml and arenas.yml. |
+| `reload` | Reloads config.yml, messages.yml, guis.yml and arenas.yml. |
 
 Time format: `12.5` / `12.5s` = seconds, `1500ms` = milliseconds.
 
@@ -112,7 +112,7 @@ A zone is exactly the selected blocks (no tolerance, unlike the start line / che
 
 ### Upgrading from older versions
 
-**Automatic file update (on start and `/bre reload`)** – `config.yml`, `messages.yml`, `gui.yml`: keys of the jar that your file is missing are added (with their default value and comment) inside their own section. Your values are never changed, unused keys stay. A copy is saved first: `plugins/BoatRace/backups/<file>.<date>.bak`; the log lists what was added. Collections (`fallback.maps`, `ranking.xp-multipliers`, `competitive.colors`, gui `maps`, `items`, `competitive-buttons`) are only added as a whole when missing - never filled up with examples. A file with a YAML error is not touched. Saving normalizes the formatting (quotes, `[a, b]` lists → bullet lists, comment alignment) - behavior unchanged. `arenas.yml` and the CaptainHook files on the proxy are never touched.
+**Automatic file update (on start and `/bre reload`)** – `config.yml`, `messages.yml`, `guis.yml`: keys of the jar that your file is missing are added (with their default value and comment) inside their own section. Your values are never changed, unused keys stay. A copy is saved first: `plugins/BoatRace/backups/<file>.<date>.bak`; the log lists what was added. Collections (`fallback.maps`, `ranking.xp-multipliers`, `competitive.colors`, and in `guis.yml` the whole `menus` section - your own menus and items) are only added as a whole when missing - never filled up with examples. A file with a YAML error is not touched. Saving normalizes the formatting (quotes, `[a, b]` lists → bullet lists, comment alignment) - behavior unchanged. `arenas.yml` and the CaptainHook files on the proxy are never touched.
 
 Old point-based checkpoints and finish are migrated to 7x3x7 zones. The old `start-block` lamp row is not migrated: set the lamps again with `/bre lights`, and set the start line with `/bre setstart`.
 
@@ -135,13 +135,28 @@ The leaderboard cache is reloaded every `records.refresh-seconds` (default 30) s
 
 `Sounds:` in `config.yml`: `start-countdown` (each lamp, with `pitch-step`), `start-go`, `checkpoint`, `lap`, `finish`, `off-track`, `jumpstart-penalty`, `missed-checkpoint`. Each has `sound` (Bukkit Sound name or a sound key, `NONE` = silent), `volume`, `pitch`.
 
-## Map menu (`/bre gui`)
+## Menus (`/bre gui <menu> [player]`)
 
-Fully configured in `gui.yml`: title, rows, item materials / names / lore / slots, extra decoration items that do nothing (`items:`), a filler, the random-map and close buttons. Map items show the arena status (free / busy / event open), players racing / grid positions, the chosen laps, the queue length and whether you may play it.
+Everything about the menus - which menus exist, their layout, icons, lore and **what every click does** - is written in `guis.yml` (the documentation is at the top of the file). Two menus are shipped: **`unranked`** (casual races: maps, laps, random map) and **`ranked`** (competitive lobbies). You can add any number of your own menus and weave any items into them.
 
-* Every map needs the permission `boatrace.map.<arena name in lower case>` (`boatrace.map.*` = all maps). Without it a click does nothing but send `gui.no-permission` (messages.yml). `/bre join <arena>` ignores map permissions unless `map-permissions.enforce-on-join-command: true`.
-* Left click a map: laps +1 (max 5), right click: laps -1 (min 1) - limits in `gui.yml` `laps:`. The map item shows the selection and the race is started with it. **Shift-click (or middle click) joins** - the clicks are configurable under `clicks:`.
-* The random button joins a random map the player has the permission for (available to everybody).
+* **Open:** `/bre gui` (default menu, `default-menu`), `/bre gui unranked`, `/bre gui ranked`; for another player (NPC, sign, command block, console; needs `boatrace.admin`): `/bre gui ranked Steve`. **Opening is completely silent** - no message to the player and none to whoever ran the command. Only a refusal is reported: unknown menu, `ranked` while `competitive.enabled` is off, no permission (menu option `permission`).
+* **Items:** `slot` / `slots`, `material`, `name`, `lore`, `enabled`, `arena` (the map the item stands for: lore placeholders, default target of its actions, `boatrace.map.<arena>` is checked), `permission`, `requires-competitive`, `actions`. When two items share a slot the later one wins. `auto-maps` adds every ready arena that has no item of its own (`filter: all | competitive`), `filler` fills the empty slots.
+* **Actions per click** - `actions: close`, `actions: [join-map, close]`, or per mouse button: `LEFT`, `RIGHT`, `SHIFT_LEFT`, `SHIFT_RIGHT` (`SHIFT` = both), `MIDDLE`, `DROP` ..., `default` = every other click.
+
+| Action | What it does |
+| --- | --- |
+| `join-map [arena]` | Join the map with the laps chosen in the menu (queue when busy, party leader = whole party). |
+| `ranked-map [arena\|random]` | Join the competitive lobby of the map (`random` = any map); a second click leaves it. |
+| `random-map [unranked\|ranked]` | A random casual map (only maps the player may play, open, with room for the whole party) / the competitive lobby of any map. |
+| `laps-increase` / `laps-decrease [arena]` | +1 / -1 lap for the map within the menu's `laps.min` - `laps.max` (default 1 - 5). |
+| `close` / `open-menu <menu>` | Close the menu / switch to another menu (silent). |
+| `player-command <cmd>` / `console-command <cmd>` / `message <text>` | Run a command as the player / from the console, send a chat message. Placeholders `{player}` `{uuid}` `{arena}` `{laps}`. |
+
+An action that is refused (no permission, map closed) stops the rest of the click. Shipped defaults: casual map = left click laps +1, right click laps -1, shift / middle click join; ranked map = any click joins / leaves the lobby.
+
+* **Permissions:** every map action needs `boatrace.map.<arena name in lower case>` (`boatrace.map.*` = all maps). Without it the click does nothing but show `gui.no-permission` (messages.yml); a map in maintenance is disabled. Items can have their own `permission`. `/bre join <arena>` ignores map permissions unless `map-permissions.enforce-on-join-command: true`.
+* **Lore placeholders:** with a map `{arena} {status} {players} {slots} {laps} {queue} {access} {permission}` (status free / busy / event open / maintenance, racing players / grid positions); ranked items `{players} {teams} {min} {max} {countdown} {queued}` (the competitive lobby); everywhere `{player}` and `{maps}`.
+* **Upgrading:** an existing `gui.yml` is converted to `guis.yml` automatically on the first start (menu `unranked` = your old menu with the same layout, icons and clicks, your competitive buttons become ranked items, the new `ranked` menu is added); the old file is kept as `gui.yml.migrated`. The automatic file update never changes your `menus`.
 
 ## Party (`/party`)
 
@@ -213,7 +228,7 @@ A busy map (no free instance, no fallback copy, no free alternative arena) puts 
 
 **One rating per player** – parties are temporary, so there is no team ranking. Everybody plays for their own `rating`; a competitive match gives + for a team win, − for a weaker result.
 
-**Enable** – `config.yml` `competitive.enabled: true` (off by default). GUI button: `gui.yml` `competitive-buttons` (`enabled: true`, a free slot).
+**Enable** – `config.yml` `competitive.enabled: true` (off by default). Menu: `/bre gui ranked` (`guis.yml` menu `ranked`; the casual menu has a button that opens it).
 
 **Limits per arena** – `/bre compset <arena> min 4` / `max 8` / `on|off` / `reset` / `info` (or `arenas.yml` `competitive: { enabled, min-players, max-players }`). Not set = `competitive.min-players` (4) and max = number of spawns. The spawns do not need to change.
 
@@ -259,7 +274,7 @@ Foundation hooks into PAPI and only returns values when the request includes an 
 
 ## Data Files
 
-`config.yml` (settings), `messages.yml` (all texts), `gui.yml` (map menu), `arenas.yml` (arenas), MariaDB (records, runs history, blacklist, claimed one-time rewards), `snapshots/` (player inventory backups taken during races, restored even after a server crash).
+`config.yml` (settings), `messages.yml` (all texts), `guis.yml` (menus), `arenas.yml` (arenas), MariaDB (records, runs history, blacklist, claimed one-time rewards), `snapshots/` (player inventory backups taken during races, restored even after a server crash).
 
 ## License
 
