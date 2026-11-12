@@ -52,6 +52,7 @@ public final class Settings {
 	public SoundSpec soundOffTrack = new SoundSpec("minecraft:block.note_block.bass", 1.0F, 0.6F);
 	public SoundSpec soundJumpstart = new SoundSpec("minecraft:entity.villager.no", 1.0F, 1.0F);
 	public SoundSpec soundLap = new SoundSpec("minecraft:block.note_block.chime", 1.0F, 1.2F);
+	public SoundSpec soundResetZone = new SoundSpec("minecraft:entity.enderman.teleport", 1.0F, 1.0F);
 	public SoundSpec soundMissedCheckpoint = new SoundSpec("minecraft:entity.villager.no", 1.0F, 0.8F);
 
 	// --- CaptainHook (season pass, achievements, missions) ---
@@ -166,6 +167,8 @@ public final class Settings {
 	public OffTrackAction offTrackAction = OffTrackAction.PENALTY;
 	public long offTrackPenaltyMs = 3000L;
 	public int offTrackScanDepth = 3;
+	/** the boat counts as on the track when ANY block under this radius around its centre is a track block */
+	public double offTrackFootprint = 0.5D;
 	public final Set<Material> defaultTrackBlocks = EnumSet.noneOf(Material.class);
 
 	// --- events (the grid itself is unlimited: /bre setspawn <arena> <1, 2, 3 ...>) ---
@@ -205,6 +208,7 @@ public final class Settings {
 		this.soundJumpstart = sound(c, "jumpstart-penalty", this.soundJumpstart);
 		this.soundMissedCheckpoint = sound(c, "missed-checkpoint", this.soundMissedCheckpoint);
 		this.soundLap = sound(c, "lap", this.soundLap);
+		this.soundResetZone = sound(c, "reset-zone", this.soundResetZone);
 
 		this.hubCommand = c.getString("hub-command", "spawn");
 
@@ -245,6 +249,7 @@ public final class Settings {
 		this.offTrackAction = parseAction(c.getString("off-track.action", "PENALTY"));
 		this.offTrackPenaltyMs = Math.max(0L, Math.round(c.getDouble("off-track.penalty-seconds", 3.0D) * 1000.0D));
 		this.offTrackScanDepth = Math.max(1, Math.min(10, c.getInt("off-track.scan-depth", 3)));
+		this.offTrackFootprint = Math.max(0.0D, Math.min(2.0D, c.getDouble("off-track.footprint-radius", 0.5D)));
 		this.defaultTrackBlocks.clear();
 
 		for (final String raw : c.getStringList("off-track.default-track-blocks")) {

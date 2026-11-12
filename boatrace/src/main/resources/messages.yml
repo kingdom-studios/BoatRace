@@ -81,6 +81,13 @@ title:
     fade-in: 0
     stay: 30
     fade-out: 8
+  # the racer touched a reset zone (void / kill zone) and is put back on the start
+  reset-zone:
+    title: ""
+    subtitle: "&c&lRESET &7You were put back on the start"
+    fade-in: 0
+    stay: 30
+    fade-out: 8
   # off track, action RESET
   off-track-reset:
     title: "&c&lOFF TRACK!"
@@ -310,6 +317,17 @@ arena:
   not-a-number: "&cNot a number: &f{value}"
   # {arena} {count}
   checkpoint-out-of-range: "&cArena &f{arena} &chas checkpoints 1-{count}."
+  # reset zones (/bre addresetzone). {arena} {index} {count} {region}
+  reset-zone-added: "&aAdded reset zone &f#{index} &ato &f{arena} &7({count} zone(s)): &7{region}"
+  reset-zone-spawn-inside: "&eWarning: a grid position of &f{arena} &eis INSIDE a reset zone - the racer would be reset again and again."
+  # {arena} {index} {count}
+  reset-zone-removed: "&aRemoved reset zone &f#{index} &aof &f{arena}&a, &f{count} &aleft. The following ones moved up by one."
+  reset-zone-out-of-range: "&cArena &f{arena} &chas reset zones 1-{count}."
+  reset-zones-cleared: "&aRemoved all &f{count} &areset zones of &f{arena}&a."
+  reset-zones-none: "&cArena &f{arena} &chas no reset zones. Add one with &f/bre addresetzone {arena}"
+  reset-zones-header: "&7Reset zones of &f{arena}&7 ({count}):"
+  # {index} {region}
+  reset-zones-line: " &8#{index} &7{region}"
   # {arena} {number}
   checkpoint-removed: "&aRemoved checkpoint &f#{number} &aof &f{arena}&a. The following ones moved up by one."
   list-empty: "&cNo arena has been created yet."
@@ -320,7 +338,7 @@ arena:
   list-maintenance: " &8- &f{arena} &6(closed - maintenance) &7checkpoints: &f{checkpoints}"
   # {arena} {checkpoints} {missing}
   list-not-ready: " &8- &f{arena} &c(not ready, missing: {missing}) &7checkpoints: &f{checkpoints}"
-  # {arena} {status} {spawn} {start} {finish} {checkpoints} {lamps} {laps} {track_blocks} {fallback} {reward_mode} {reward_count}
+  # {arena} {status} {spawn} {start} {finish} {checkpoints} {lamps} {laps} {reset_zones} {track_blocks} {fallback} {reward_mode} {reward_count}
   info:
     - "Arena &f{arena} {status}"
     - " &8- &7Grid positions: &f{spawn}"
@@ -329,6 +347,7 @@ arena:
     - " &8- &7Checkpoints: &f{checkpoints}"
     - " &8- &7Start lamps: &f{lamps}"
     - " &8- &7Laps: &f{laps}"
+    - " &8- &7Reset zones: &f{reset_zones}"
     - " &8- &7Track blocks: &f{track_blocks}"
     - " &8- &7Alternative maps: &f{fallback}"
     - " &8- &7Reward: &f{reward_mode} &7({reward_count} commands)"

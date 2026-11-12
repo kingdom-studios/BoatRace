@@ -30,6 +30,7 @@ final class InfoSub extends RaceSubCommand {
 				"checkpoints", arena.getCheckpoints().size(),
 				"lamps", arena.getLights().size(),
 				"laps", arena.getLaps(),
+				"reset_zones", arena.getResetZones().size(),
 				"track_blocks", TrackBlocksSub.describe(arena, this.plugin().getSettings().defaultTrackBlocks),
 				"fallback", this.plugin().getSettings().fallbackWorldsOf(arena.getName()).isEmpty() ? "-"
 						: String.join(", ", this.plugin().getSettings().fallbackWorldsOf(arena.getName())),

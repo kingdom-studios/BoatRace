@@ -51,6 +51,8 @@ public final class Arena {
 	private final List<Region> checkpoints = new ArrayList<>();
 	/** F1 lamps in lighting order; every lamp may consist of several blocks */
 	private final List<Region> lights = new ArrayList<>();
+	/** touching one during a race resets the racer (void / kill zones) */
+	private final List<Region> resetZones = new ArrayList<>();
 	/** blocks the boat must stay on; empty = the default list from config.yml */
 	private final Set<Material> trackBlocks = EnumSet.noneOf(Material.class);
 
@@ -142,6 +144,10 @@ public final class Arena {
 
 	public List<Region> getLights() {
 		return this.lights;
+	}
+
+	public List<Region> getResetZones() {
+		return this.resetZones;
 	}
 
 	public Set<Material> getTrackBlocks() {
@@ -263,6 +269,9 @@ public final class Arena {
 
 		for (final Region lamp : this.lights)
 			copy.lights.add(lamp.withWorld(world));
+
+		for (final Region zone : this.resetZones)
+			copy.resetZones.add(zone.withWorld(world));
 
 		copy.trackBlocks.addAll(this.trackBlocks);
 		copy.laps = this.laps;

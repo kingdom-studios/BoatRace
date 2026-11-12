@@ -55,13 +55,18 @@ abstract class RaceSubCommand extends SimpleSubCommand {
 
 	/** Returns the player's wand selection (pos1 + pos2) or stops the command with a message. */
 	protected final Region requireSelection(final Player player) {
+		return this.requireSelection(player, MAX_ZONE_VOLUME);
+	}
+
+	/** Same with another size limit (reset zones are checked as one box, so they may be huge). */
+	protected final Region requireSelection(final Player player, final long maxVolume) {
 		final Region region = this.plugin().getSelections().getRegion(player);
 
 		if (region == null)
 			this.returnTell(Msg.text("command.selection-required"));
 
-		if (region.volume() > MAX_ZONE_VOLUME)
-			this.returnTell(Msg.text("command.selection-too-large", "volume", region.volume(), "max", MAX_ZONE_VOLUME));
+		if (region.volume() > maxVolume)
+			this.returnTell(Msg.text("command.selection-too-large", "volume", region.volume(), "max", maxVolume));
 
 		return region;
 	}

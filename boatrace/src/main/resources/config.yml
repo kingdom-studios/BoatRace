@@ -70,6 +70,11 @@ Sounds:
     sound: BLOCK_NOTE_BLOCK_CHIME
     volume: 1.0
     pitch: 1.2
+  # the racer touched a reset zone (/bre addresetzone)
+  reset-zone:
+    sound: ENTITY_ENDERMAN_TELEPORT
+    volume: 1.0
+    pitch: 1.0
   # finish line crossed with a skipped checkpoint
   missed-checkpoint:
     sound: ENTITY_VILLAGER_NO
@@ -127,7 +132,13 @@ off-track:
   # RESET         = restart the run (in events: same as TELEPORT_BACK, an event cannot be restarted)
   action: PENALTY
   penalty-seconds: 3.0
-  scan-depth: 3             # blocks scanned downwards for the first solid block (air = airborne, ignored)
+  # Flying and falling is NEVER punished: no penalty, no warning, and the grace time starts anew after landing.
+  # A boat counts as flying / falling when the game says so (boat status IN_AIR) or when there is nothing to drive on
+  # under it: no solid block, water or lava (non-solid decoration like grass does not count) within scan-depth blocks.
+  scan-depth: 3             # how deep under the boat (blocks) a surface is looked for
+  # The boat is on the track as soon as ANY block under this radius (blocks) around its centre is a track block, so a
+  # boat half over the edge is not punished. 0 = only the block under the centre.
+  footprint-radius: 0.5
   # Used by arenas that have no own track blocks. Empty by default so existing tracks are not penalized
   # until you configure them. Example: [ICE, PACKED_ICE, BLUE_ICE]
   default-track-blocks: []

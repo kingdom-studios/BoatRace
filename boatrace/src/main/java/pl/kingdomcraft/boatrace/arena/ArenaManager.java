@@ -125,6 +125,7 @@ public final class ArenaManager {
 
 			arena.getCheckpoints().addAll(loadList(section.getConfigurationSection("checkpoints")));
 			arena.getLights().addAll(loadList(section.getConfigurationSection("lights")));
+			arena.getResetZones().addAll(loadList(section.getConfigurationSection("reset-zones")));
 
 			for (final String raw : section.getStringList("track-blocks")) {
 				final Material material = Material.matchMaterial(raw);
@@ -209,6 +210,11 @@ public final class ArenaManager {
 				trackBlocks.add(material.name());
 
 			yaml.set(base + ".track-blocks", trackBlocks);
+
+			index = 0;
+
+			for (final Region zone : arena.getResetZones())
+				zone.save(yaml.createSection(base + ".reset-zones." + index++));
 
 			yaml.set(base + ".laps", arena.getLaps());
 			yaml.set(base + ".maintenance", arena.isMaintenance());

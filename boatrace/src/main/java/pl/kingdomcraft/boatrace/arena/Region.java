@@ -63,28 +63,46 @@ public record Region(String world, int minX, int minY, int minZ, int maxX, int m
 
 	/** True when the location lies inside the (tolerance-expanded) box. */
 	public boolean contains(final Location location) {
+		return this.containsPadded(location, 0.5D, VERTICAL_TOLERANCE);
+	}
+
+	/** True when the movement segment from -> to touches the box (fast boats cannot skip a zone between two ticks). */
+	public boolean intersects(final Location from, final Location to) {
+		return this.sweep(from, to, 0.5D, VERTICAL_TOLERANCE);
+	}
+
+	/** Like {@link #contains}, but exactly the selected blocks - no vertical tolerance (reset zones). */
+	public boolean containsExact(final Location location) {
+		return this.containsPadded(location, 0.0D, 0.0D);
+	}
+
+	/** Like {@link #intersects}, but exactly the selected blocks - no vertical tolerance (reset zones). */
+	public boolean intersectsExact(final Location from, final Location to) {
+		return this.sweep(from, to, 0.0D, 0.0D);
+	}
+
+	private boolean containsPadded(final Location location, final double padBelow, final double padAbove) {
 		if (!this.sameWorld(location))
 			return false;
 
 		final double x = location.getX(), y = location.getY(), z = location.getZ();
 
 		return x >= this.minX && x < this.maxX + 1
-				&& y >= this.minY - 0.5D && y < this.maxY + 1 + VERTICAL_TOLERANCE
+				&& y >= this.minY - padBelow && y < this.maxY + 1 + padAbove
 				&& z >= this.minZ && z < this.maxZ + 1;
 	}
 
-	/** True when the movement segment from -> to touches the box (fast boats cannot skip a zone between two ticks). */
-	public boolean intersects(final Location from, final Location to) {
+	private boolean sweep(final Location from, final Location to, final double padBelow, final double padAbove) {
 		if (!this.sameWorld(to))
 			return false;
 
 		if (from.getWorld() != to.getWorld())
-			return this.contains(to);
+			return this.containsPadded(to, padBelow, padAbove);
 
 		final double[] start = { from.getX(), from.getY(), from.getZ() };
 		final double[] delta = { to.getX() - start[0], to.getY() - start[1], to.getZ() - start[2] };
-		final double[] low = { this.minX, this.minY - 0.5D, this.minZ };
-		final double[] high = { this.maxX + 1, this.maxY + 1 + VERTICAL_TOLERANCE, this.maxZ + 1 };
+		final double[] low = { this.minX, this.minY - padBelow, this.minZ };
+		final double[] high = { this.maxX + 1, this.maxY + 1 + padAbove, this.maxZ + 1 };
 
 		double tMin = 0.0D, tMax = 1.0D;
 

@@ -153,6 +153,9 @@ public final class RaceManager {
 	/** waiting players / parties per arena ("arena name in lower case" -> FIFO list) */
 	private final Map<String, List<QueueEntry>> queues = new LinkedHashMap<>();
 
+	/** What counts as solid ground under the boat. A field only so the tests can run without the server's block registry. */
+	Predicate<Material> solidCheck = Material::isSolid;
+
 	private BukkitTask ticker;
 	private long tickCounter;
 	private long queueTicker;
@@ -1536,6 +1539,18 @@ public final class RaceManager {
 
 	private void handleRunningMove(final RaceSession s, final Player player, final Location from, final Location to) {
 		final Arena arena = s.heat.arena;
+
+		// a reset is already on its way (reset zone, off track, left the boat ...): this run no longer counts anything
+		if (s.restartQueued)
+			return;
+
+		// reset zones (void / kill zones): exactly the selected blocks, swept so a fast fall cannot skip them
+		for (final Region zone : arena.getResetZones())
+			if (zone.intersectsExact(from, to)) {
+				this.resetByZone(s, player);
+				return;
+			}
+
 		final Zone start = arena.getStartLine();
 		final Zone finish = arena.getFinishLine();
 
@@ -2676,13 +2691,16 @@ public final class RaceManager {
 			return;
 
 		final Location location = s.boat.getLocation();
-		final Material below = this.blockBelow(location);
+		final Ground ground = this.groundUnder(s.boat, allowed);
 
-		// airborne (jump, drop) - neither on nor off the track
-		if (below == null)
+		// Flying or falling (ramp jump, drop, falling boat): neither on nor off the track. Never a violation, and the
+		// time spent off the track starts anew once the boat lands.
+		if (ground == Ground.AIR) {
+			s.offTrackTicks = 0;
 			return;
+		}
 
-		if (allowed.contains(below)) {
+		if (ground == Ground.TRACK) {
 			s.offTrackTicks = 0;
 			s.offTrack = false;
 			s.lastTrackPos = location.clone();
@@ -2731,21 +2749,62 @@ public final class RaceManager {
 		}
 	}
 
-	/** Material of the first non-air block under the boat (scan-depth blocks deep), or null when airborne. */
-	private Material blockBelow(final Location location) {
+	/** What is under the boat. */
+	private enum Ground {
+		/** no surface under it: flying / falling */
+		AIR,
+		/** a track block under (part of) it */
+		TRACK,
+		/** surface under it, but no track block */
+		OFF_TRACK
+	}
+
+	/**
+	 * Flying / falling when the game itself says so (boat status IN_AIR) or when there is no surface at all under the
+	 * boat's footprint within scan-depth blocks. On the track as soon as ANY block of the footprint is a track block
+	 * (a boat half over the edge is still on the track). Only a surface that is not a track block is off the track.
+	 */
+	private Ground groundUnder(final Boat boat, final Set<Material> allowed) {
+		if (boat.getStatus() == Boat.Status.IN_AIR)
+			return Ground.AIR;
+
+		final Location location = boat.getLocation();
 		final World world = location.getWorld();
 
 		if (world == null)
-			return null;
+			return Ground.AIR;
 
-		final int x = location.getBlockX();
-		final int z = location.getBlockZ();
+		final double radius = this.settings.offTrackFootprint;
+		final double[][] offsets = radius <= 0.0D
+				? new double[][] { { 0.0D, 0.0D } }
+				: new double[][] { { 0.0D, 0.0D }, { radius, 0.0D }, { -radius, 0.0D }, { 0.0D, radius }, { 0.0D, -radius } };
 		final int top = (int) Math.floor(location.getY() - 0.1D);
+		boolean surface = false;
 
+		for (final double[] offset : offsets) {
+			final Material found = this.surfaceAt(world, (int) Math.floor(location.getX() + offset[0]), top, (int) Math.floor(location.getZ() + offset[1]), allowed);
+
+			if (found == null)
+				continue;
+
+			if (allowed.contains(found))
+				return Ground.TRACK;
+
+			surface = true;
+		}
+
+		return surface ? Ground.OFF_TRACK : Ground.AIR;
+	}
+
+	/**
+	 * The first block under the boat (scan-depth blocks deep) that something can drive on: a solid block, water, lava
+	 * or a track block. Air and non-solid decoration (grass, flowers, ...) are not ground. Null when there is none.
+	 */
+	private Material surfaceAt(final World world, final int x, final int top, final int z, final Set<Material> allowed) {
 		for (int depth = 0; depth < this.settings.offTrackScanDepth; depth++) {
 			final Material type = world.getBlockAt(x, top - depth, z).getType();
 
-			if (!type.isAir())
+			if (allowed.contains(type) || this.solidCheck.test(type) || type == Material.WATER || type == Material.LAVA)
 				return type;
 		}
 
@@ -2828,6 +2887,51 @@ public final class RaceManager {
 			return;
 
 		this.queueRestart(s);
+	}
+
+	/**
+	 * A racer touched a reset zone. Solo: exactly what /bre reset does - the run is aborted and a fresh attempt starts
+	 * (clock, checkpoints, laps and penalties reset, new countdown). Event / party: the clock belongs to everybody, so
+	 * the racer is put back on their own grid slot with checkpoints / laps reset and has to cross the start line again;
+	 * the time that has passed counts against them.
+	 */
+	private void resetByZone(final RaceSession s, final Player player) {
+		Msg.title(player, "reset-zone");
+		this.settings.soundResetZone.play(player);
+
+		if (s.heat.event)
+			this.queueSlotReset(s);
+		else
+			this.queueRestart(s);
+	}
+
+	private void queueSlotReset(final RaceSession s) {
+		if (s.restartQueued || s.disposed)
+			return;
+
+		s.restartQueued = true;
+
+		// next tick - never teleport inside the move event that triggered this
+		Bukkit.getScheduler().runTask(this.plugin, () -> {
+			if (s.disposed || this.sessions.get(s.playerId) != s || s.heat == null)
+				return;
+
+			s.restartQueued = false;
+			this.resetProgress(s);
+			this.place(s, this.spawnOf(s));
+		});
+	}
+
+	/** Back to the beginning of the race for one racer of a running event: checkpoints, laps, start line - not the clock. */
+	private void resetProgress(final RaceSession s) {
+		s.lap = 1;
+		s.nextCheckpoint = 0;
+		s.crossedStart = false;
+		s.splits = new long[s.splits.length];
+		s.deltaText = "";
+		s.lastTrackPos = null;
+		s.offTrack = false;
+		s.offTrackTicks = 0;
 	}
 
 	private void queueRestart(final RaceSession s) {

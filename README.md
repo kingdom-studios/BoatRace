@@ -94,7 +94,17 @@ An arena instance (arena + world) is used by one solo racer or one event at a ti
 ### Start signal and off-track detection
 
 * The start signal is the F1 lamp structure itself: the lamp blocks light up red during the countdown, turn into `start-signal.go-block` at lights out and after `duration-seconds` (default 5) into `off-block` (empty = the real block, e.g. AIR or BLACK_CONCRETE). `mode: CLIENT` only shows it to the racers; `mode: WORLD` changes the real blocks (always restored on reset / shutdown). `enabled: false` = the lamps just go dark.
-* After the start line, the block under the boat is checked every `off-track.check-interval-ticks`. Arenas use their own `trackblocks`, or `off-track.default-track-blocks` (empty = disabled). After `grace-ticks` off the track the `action` is applied: `PENALTY` (+`penalty-seconds`), `TELEPORT_BACK` (last on-track position + penalty) or `RESET` (restart; in events same as TELEPORT_BACK). Warning texts: `title.off-track*` / `race.off-track*` in messages.yml.
+* After the start line, the ground under the boat is checked every `off-track.check-interval-ticks`. Arenas use their own `trackblocks`, or `off-track.default-track-blocks` (empty = disabled). After `grace-ticks` on ground that is not a track block the `action` is applied: `PENALTY` (+`penalty-seconds`), `TELEPORT_BACK` (last on-track position + penalty) or `RESET` (restart; in events same as TELEPORT_BACK). Warning texts: `title.off-track*` / `race.off-track*` in messages.yml.
+* **Flying and falling is never punished** (ramp jumps, drops, a falling boat): a boat counts as in the air when the game says so (boat status `IN_AIR`) or when there is nothing to drive on under its footprint within `scan-depth` blocks (solid blocks, water, lava and track blocks count as ground; air and non-solid decoration like grass do not). Taking off also resets the time already spent off the track, so after landing the grace time starts again. The boat is on the track as soon as any block within `footprint-radius` (default 0.5) of its centre is a track block - half over the edge is still on the track.
+
+### Reset zones (void / kill zones)
+
+`/bre addresetzone <arena>` adds your wand selection as a reset zone, `/bre removeresetzone <arena> <index|all|list>` removes / lists them (several zones per arena, saved as `reset-zones.<n>` in arenas.yml, shown in `/bre info`). A racer who touches a zone during a running race is reset immediately:
+
+* **Solo:** exactly like `/bre reset` - the run is aborted and a fresh attempt starts on grid position #1 (clock, checkpoints, laps and penalties reset, new countdown).
+* **Event / party:** the clock belongs to everybody, so the racer goes back to their own grid slot with checkpoints and laps reset (they must cross the start line again); the clock keeps running and their penalties stay, so the time lost counts against them.
+
+A zone is exactly the selected blocks (no tolerance, unlike the start line / checkpoints) and is swept between ticks, so even a very fast fall cannot skip a thin slab. Zones can be huge (e.g. a void slab under the whole track). Title `title.reset-zone`, sound `Sounds.reset-zone`. A grid position inside a zone is reported when you add the zone.
 
 ### Rewards
 
