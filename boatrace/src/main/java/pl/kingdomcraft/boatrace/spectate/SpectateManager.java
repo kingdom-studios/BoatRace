@@ -30,6 +30,8 @@ public final class SpectateManager implements Listener {
 	private final JavaPlugin plugin;
 	private final RaceManager races;
 	private final Map<UUID, Previous> spectators = new HashMap<>();
+	/** spectator -> the racer they were attached to (the tab list shows that racer's session) */
+	private final Map<UUID, UUID> targets = new HashMap<>();
 
 	public SpectateManager(final JavaPlugin plugin, final RaceManager races) {
 		this.plugin = plugin;
@@ -38,6 +40,11 @@ public final class SpectateManager implements Listener {
 
 	public boolean isSpectating(final Player player) {
 		return this.spectators.containsKey(player.getUniqueId());
+	}
+
+	/** @return the racer the player spectates, or null */
+	public UUID targetOf(final UUID spectator) {
+		return this.targets.get(spectator);
 	}
 
 	/**
@@ -53,6 +60,7 @@ public final class SpectateManager implements Listener {
 		}
 
 		this.spectators.putIfAbsent(admin.getUniqueId(), new Previous(admin.getGameMode(), admin.getLocation()));
+		this.targets.put(admin.getUniqueId(), target.getUniqueId());
 
 		admin.setGameMode(GameMode.SPECTATOR);
 		admin.teleport(target.getLocation());
@@ -74,6 +82,8 @@ public final class SpectateManager implements Listener {
 	 */
 	public boolean stop(final Player player, final boolean silent) {
 		final Previous previous = this.spectators.remove(player.getUniqueId());
+
+		this.targets.remove(player.getUniqueId());
 
 		if (previous == null)
 			return false;
@@ -100,6 +110,7 @@ public final class SpectateManager implements Listener {
 		}
 
 		this.spectators.clear();
+		this.targets.clear();
 	}
 
 	@EventHandler(priority = EventPriority.MONITOR)

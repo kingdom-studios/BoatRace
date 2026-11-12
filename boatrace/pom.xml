@@ -42,6 +42,34 @@
             <version>3.5.3</version>
         </dependency>
 
+        <!-- CaptainHook-Bukkit (season pass, achievements, minigame stats) is a soft dependency (plugin.yml "softdepend"):
+             only the classes in pl.kingdomcraft.boatrace.captainhook touch it. PROVIDED by the server, never shaded.
+             Use the same build as on the network (rebuild lib/CaptainHook and copy bukkit/target/CaptainHook-Bukkit-*.jar here). -->
+        <dependency>
+            <groupId>pl.kingdomcraft</groupId>
+            <artifactId>captainhook-bukkit</artifactId>
+            <version>2.0.0</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/libs/CaptainHook-Bukkit-2.0.0.jar</systemPath>
+        </dependency>
+
+        <!-- LuckPerms API (team tag as transient meta, optional: plugin.yml "softdepend"). Only
+             pl.kingdomcraft.boatrace.luckperms.LuckPermsGateway touches it. PROVIDED by the server, never shaded. -->
+        <dependency>
+            <groupId>net.luckperms</groupId>
+            <artifactId>api</artifactId>
+            <version>5.4</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Unit tests of the plain logic (ELO, team matching, team scoring) -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.11.4</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- Paper API is provided by the server -->
         <dependency>
             <groupId>io.papermc.paper</groupId>
@@ -68,6 +96,12 @@
                     <release>${java.version}</release>
                     <parameters>true</parameters>
                 </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
             </plugin>
 
             <plugin>

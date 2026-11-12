@@ -71,6 +71,9 @@ final class RaceSession {
 	/** checkpoint delta shown permanently on the action bar until the next checkpoint overwrites it */
 	String deltaText = "";
 
+	/** blocks sailed in THIS attempt since lights out (reset with every restart) */
+	double runDistance;
+
 	boolean restartQueued;
 	boolean disposed;
 	/** true while the plugin itself teleports the player / boat, so the teleport listener ignores it */

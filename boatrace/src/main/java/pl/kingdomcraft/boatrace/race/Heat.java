@@ -72,6 +72,28 @@ final class Heat {
 	/** number of racers when the lights went out */
 	int fieldSize;
 
+	/** counts for the ranking (decided at lights out, see RaceManager#isRanked) */
+	boolean ranked;
+	/** the ranking points of this race were handed out */
+	boolean rankingSettled;
+	/** racers who left a ranked or team race before the finish, in leaving order */
+	final List<Result> dnf = new ArrayList<>();
+
+	/** a competitive match (team against team, from a lobby) */
+	boolean competitive;
+	/** competitive: XP factor of every racer from the same lineup bonus (1.0 = none) */
+	final Map<java.util.UUID, Double> xpBoost = new java.util.HashMap<>();
+	/** competitive: matches in a row of the racer's lineup, this one included */
+	final Map<java.util.UUID, Integer> lineupStreak = new java.util.HashMap<>();
+	/** competitive: team index of every racer of the match (also those who left) */
+	final Map<java.util.UUID, Integer> teamOf = new java.util.HashMap<>();
+	/** team race: color of every team, by team index */
+	final List<pl.kingdomcraft.boatrace.team.TeamColor> teamColors = new ArrayList<>();
+	/** team race: the team result was computed (standings, team rating) */
+	boolean teamSettled;
+	/** team race: best team first, null until settled */
+	List<pl.kingdomcraft.boatrace.team.TeamScoring.Standing> teamStandings;
+
 	Heat(final String key, final Arena arena, final boolean event) {
 		this.key = key;
 		this.arena = arena;

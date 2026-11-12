@@ -59,6 +59,10 @@ public final class Arena {
 
 	/** laps of a normal race on this arena (events may override it) */
 	private int laps = 1;
+	/** arenas.yml "competitive" (all optional, null = the config.yml default) */
+	private Boolean competitiveEnabled;
+	private Integer competitiveMin;
+	private Integer competitiveMax;
 
 	private RewardMode rewardMode = RewardMode.NONE;
 	private final List<String> rewardCommands = new ArrayList<>();
@@ -160,6 +164,41 @@ public final class Arena {
 		this.laps = Math.max(1, laps);
 	}
 
+	// Competitive (arenas.yml "competitive": enabled / min-players / max-players, each optional)
+
+	public Boolean getCompetitiveEnabledRaw() {
+		return this.competitiveEnabled;
+	}
+
+	public Integer getCompetitiveMinRaw() {
+		return this.competitiveMin;
+	}
+
+	public Integer getCompetitiveMaxRaw() {
+		return this.competitiveMax;
+	}
+
+	public void setCompetitive(final Boolean enabled, final Integer min, final Integer max) {
+		this.competitiveEnabled = enabled;
+		this.competitiveMin = min;
+		this.competitiveMax = max;
+	}
+
+	/** Competitive matches may run here (default: yes). */
+	public boolean isCompetitive() {
+		return this.competitiveEnabled == null || this.competitiveEnabled;
+	}
+
+	/** Most racers of a competitive match: arenas.yml max-players, never more than the grid positions. */
+	public int competitiveMax() {
+		return Math.min(this.spawns.size(), this.competitiveMax != null ? Math.max(2, this.competitiveMax) : this.spawns.size());
+	}
+
+	/** Racers needed for the countdown: arenas.yml min-players or the default, at least 2, at most the max. */
+	public int competitiveMin(final int defaultMin) {
+		return Math.max(2, Math.min(this.competitiveMax(), this.competitiveMin != null ? this.competitiveMin : defaultMin));
+	}
+
 	// ------------------------------------------------------------------------------------------
 	// Rewards
 	// ------------------------------------------------------------------------------------------
@@ -227,6 +266,9 @@ public final class Arena {
 
 		copy.trackBlocks.addAll(this.trackBlocks);
 		copy.laps = this.laps;
+		copy.competitiveEnabled = this.competitiveEnabled;
+		copy.competitiveMin = this.competitiveMin;
+		copy.competitiveMax = this.competitiveMax;
 		copy.maintenance = this.maintenance;
 		copy.rewardMode = this.rewardMode;
 		copy.rewardCommands.addAll(this.rewardCommands);

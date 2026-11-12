@@ -1,0 +1,86 @@
+# !-----------------------------------------------------------------------------------------------!
+#                                          Season pass
+# !-----------------------------------------------------------------------------------------------!
+#
+#   Players earn XP anywhere on the network (plugins call CaptainHookAPI.addPassXP, achievements can
+#   grant it). Every xp-per-level XP is one level. Each level listed under "tiers" has a reward on the
+#   free track and one on the premium track; a reward is claimed once.
+#
+#   Progress lives in the database: ch_seasonpass (XP, premium) and ch_seasonpass_claims.
+#   Whether a player owns the premium track is the "premium" column of ch_seasonpass.
+#   Players claim tier rewards on the website (dashboard). The season and its rewards are copied into
+#   the database (ch_seasonpass_seasons, ch_seasonpass_rewards) on every start and reload for that.
+#
+#   Apply changes with /captainhookproxy reload.
+#
+# !-----------------------------------------------------------------------------------------------!
+
+# false = no XP is counted and nothing can be claimed.
+enabled: true
+
+season:
+
+  # Key of the season in the database: a-z, 0-9, _ and -. Changing it starts a NEW season, everyone
+  # begins at zero (the old season's rows stay in the database).
+  id: "s1"
+
+  # Shown to players.
+  name: "Test: Halloween"
+
+  # First and last day of the season (inclusive), in the time zone below. Outside of them no XP is
+  # counted and nothing can be claimed. Leave empty for no limit.
+  starts: ""
+  ends: ""
+  timezone: "Europe/Warsaw"
+
+  # After the last day, XP is no longer earned but rewards can still be claimed for this many days.
+  claim-grace-days: 7
+
+# XP needed for the first level. The XP of a level is counted from the previous one, so with 1000 here
+# level 1 needs 1000 XP in total, level 2 2000 XP, and so on.
+xp-per-level: 1000
+
+# Makes higher levels cost more: level n needs xp-per-level + (n - 1) * this. 0 = every level costs the same.
+# Example: 1000 and 250 give 1000, 1250, 1500, 1750, 2000 XP per level (7500 in total for level 5).
+xp-increase-per-level: 0
+
+# Premium track, bought by the player on the website with KingdomCoins. 0 = it cannot be bought there.
+premium:
+  price: 500
+
+# The highest level. Defaults to the highest tier below; XP keeps counting beyond it.
+#max-level: 5
+
+# Rewards by level. Both tracks are optional. A level can also set its own price instead of the curve above
+# with "xp: 2500" (the XP of THAT level, not the total), even without any reward. Reward keys:
+#   kingdomcoins: 50      KingdomCoins
+#   commands: [...]       console commands on the player's server, {player} = name, {uuid} = UUID
+#   message: "..."        shown to the player when the commands run
+#   require-server: "x"   the commands only run on this server (its name in velocity.toml), e.g. a
+#                         game-mode item; the reward waits in the queue while the player is elsewhere
+tiers:
+  1:
+    free:
+      kingdomcoins: 5
+    premium:
+      kingdomcoins: 25
+  2:
+    free:
+      kingdomcoins: 5
+    premium:
+      kingdomcoins: 25
+  3:
+    free:
+      kingdomcoins: 10
+    premium:
+      kingdomcoins: 50
+  4:
+    free:
+      kingdomcoins: 10
+    premium:
+      kingdomcoins: 50
+  5:
+    free:
+      kingdomcoins: 25
+    premium:
+      kingdomcoins: 100

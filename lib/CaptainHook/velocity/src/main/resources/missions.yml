@@ -1,0 +1,230 @@
+# !-----------------------------------------------------------------------------------------------!
+#                         Season pass missions (daily / weekly / season)
+# !-----------------------------------------------------------------------------------------------!
+#
+#   Missions give season pass XP. The proxy draws the missions of every period ONCE for the whole network
+#   (the draw only depends on the season and the period, so it is stable) and stores them in the database;
+#   the Paper servers only report what players do. There is nothing to configure per server.
+#
+#   Periods: daily missions reset at 00:00, weekly ones on Monday at 00:00 (time zone below).
+#   Season missions are the same for the whole season.
+#
+#   Mission keys:
+#     key        unique ID (a-z, 0-9, _ and -). Do not rename: a renamed mission counts as a new one
+#     always     true = in every period, counted in daily-count / weekly-count
+#     objective  what is counted:
+#                LOGIN                    first connection of the day
+#                DISTINCT_DAYS            the same, meant for "play on 5 different days" in weekly/season pools
+#                PLAYTIME_MINUTES         minutes of active play (AFK does not count, see EssentialsX)
+#                VOTE                     a vote received by NuVotifier on the proxy
+#                BLOCK_BREAK, MOB_KILL, ITEM_CRAFT    events on the Paper servers (not in creative mode)
+#                MINIGAME_STAT            a counter a minigame reports through CaptainHookAPI (needs filter: game + stat)
+#                ROLEPLAY_QUEST_COMPLETE  reported by the quest plugin through CaptainHookAPI.reportMissionProgress
+#     target     how much is needed
+#     xp         season pass XP for completing it
+#     icon       login | clock | quest | vote | generic
+#     unit       text after the numbers (e.g. "min"), pl/en
+#     title      the text players see, pl/en (en is required)
+#     weight     chance of being drawn compared to the others of the pool (default 10)
+#     filter     optional conditions, all must match: server (name in velocity.toml), world, material, entity,
+#                game and stat (MINIGAME_STAT). Several values: a list.
+#                min-value (MINIGAME_STAT only): instead of adding up a counter, count 1 for every report of the
+#                stat whose value is at least this - with any operation, so it works for records too: "finish a
+#                race with an average speed of 5 blocks/s" = stat top_avg_speed, min-value 500 (the minigame
+#                reports the value of THAT race; the stored best does not matter).
+#
+#   The XP below is deliberately low (a fifth of the original design); tune it here.
+#   Apply changes with /captainhookproxy reload (missions already drawn for the current period stay).
+#
+# !-----------------------------------------------------------------------------------------------!
+
+enabled: true
+timezone: "Europe/Warsaw"
+
+# How many missions are active per day / week (missions with "always: true" are part of that number).
+daily-count: 4
+weekly-count: 4
+
+# How often counted progress is written to the database (it is also written when a player leaves).
+flush-interval-seconds: 45
+
+pools:
+  daily:
+    - key: daily-login
+      always: true
+      objective: LOGIN
+      target: 1
+      xp: 10
+      icon: login
+      title: { pl: "Wejdź na serwer", en: "Log in to the server" }
+
+    - key: daily-play-30
+      objective: PLAYTIME_MINUTES
+      target: 30
+      xp: 30
+      icon: clock
+      unit: { pl: "min", en: "min" }
+      title: { pl: "Graj 30 minut na dowolnym trybie", en: "Play 30 minutes on any mode" }
+      weight: 10
+
+    - key: daily-roleplay-quests-5
+      objective: ROLEPLAY_QUEST_COMPLETE
+      target: 5
+      xp: 40
+      icon: quest
+      filter: { server: "roleplay" }
+      title: { pl: "Ukończ 5 zadań w Roleplay", en: "Finish 5 quests in Roleplay" }
+      weight: 6
+
+    - key: daily-vote
+      objective: VOTE
+      target: 1
+      xp: 20
+      icon: vote
+      title: { pl: "Zagłosuj na serwer", en: "Vote for the server" }
+      weight: 8
+
+    - key: daily-mine-200
+      objective: BLOCK_BREAK
+      target: 200
+      xp: 24
+      icon: generic
+      filter: { material: ["STONE", "DEEPSLATE", "COBBLESTONE"] }
+      title: { pl: "Wykop 200 bloków kamienia", en: "Mine 200 stone blocks" }
+      weight: 5
+
+    - key: daily-mobs-30
+      objective: MOB_KILL
+      target: 30
+      xp: 24
+      icon: generic
+      filter: { entity: ["ZOMBIE", "SKELETON", "SPIDER", "CREEPER"] }
+      title: { pl: "Pokonaj 30 potworów", en: "Defeat 30 hostile mobs" }
+      weight: 5
+
+    - key: daily-hot-matches-2
+      objective: MINIGAME_STAT
+      target: 2
+      xp: 30
+      icon: generic
+      filter: { game: "house-of-terror", stat: "matches" }
+      title: { pl: "Zagraj 2 mecze w House of Terror", en: "Play 2 matches of House of Terror" }
+      weight: 6
+
+    - key: daily-hot-kills-30
+      objective: MINIGAME_STAT
+      target: 30
+      xp: 24
+      icon: generic
+      filter: { game: "house-of-terror", stat: "kills" }
+      title: { pl: "Pokonaj 30 potworów w House of Terror", en: "Defeat 30 monsters in House of Terror" }
+      weight: 5
+
+    - key: daily-br-finishes-3
+      objective: MINIGAME_STAT
+      target: 3
+      xp: 24
+      icon: generic
+      filter: { game: "formula-boat-racing", stat: "races" }
+      title: { pl: "Ukończ 3 wyścigi łodzi", en: "Finish 3 boat races" }
+      weight: 6
+
+    - key: daily-br-distance-3000
+      objective: MINIGAME_STAT
+      target: 3000
+      xp: 24
+      icon: generic
+      unit: { pl: "bloków", en: "blocks" }
+      filter: { game: "formula-boat-racing", stat: "distance" }
+      title: { pl: "Przepłyń 3000 bloków w wyścigach łodzi", en: "Sail 3000 blocks in boat races" }
+      weight: 5
+
+    - key: daily-br-speed-5
+      objective: MINIGAME_STAT
+      target: 1
+      xp: 30
+      icon: generic
+      filter: { game: "formula-boat-racing", stat: "top_avg_speed", min-value: 500 }
+      title: { pl: "Ukończ wyścig łodzi ze średnią prędkością min. 5 bloków/s", en: "Finish a boat race averaging 5+ blocks/s" }
+      weight: 4
+
+  weekly:
+    - key: weekly-play-5h
+      objective: PLAYTIME_MINUTES
+      target: 300
+      xp: 120
+      icon: clock
+      unit: { pl: "min", en: "min" }
+      title: { pl: "Graj 5 godzin w tym tygodniu", en: "Play 5 hours this week" }
+
+    - key: weekly-days-5
+      objective: DISTINCT_DAYS
+      target: 5
+      xp: 80
+      icon: login
+      title: { pl: "Wejdź na serwer w 5 różnych dni", en: "Log in on 5 different days" }
+
+    - key: weekly-roleplay-quests-20
+      objective: ROLEPLAY_QUEST_COMPLETE
+      target: 20
+      xp: 140
+      icon: quest
+      filter: { server: "roleplay" }
+      title: { pl: "Ukończ 20 zadań w Roleplay", en: "Finish 20 quests in Roleplay" }
+
+    - key: weekly-vote-5
+      objective: VOTE
+      target: 5
+      xp: 60
+      icon: vote
+      title: { pl: "Zagłosuj 5 razy w tym tygodniu", en: "Vote 5 times this week" }
+
+    - key: weekly-hot-wins-3
+      objective: MINIGAME_STAT
+      target: 3
+      xp: 100
+      icon: generic
+      filter: { game: "house-of-terror", stat: "wins" }
+      title: { pl: "Uciekaj z House of Terror 3 razy", en: "Escape House of Terror 3 times" }
+
+    - key: weekly-hot-puzzles-10
+      objective: MINIGAME_STAT
+      target: 10
+      xp: 80
+      icon: generic
+      filter: { game: "house-of-terror", stat: "puzzles" }
+      title: { pl: "Rozwiąż 10 zagadek w House of Terror", en: "Solve 10 puzzles in House of Terror" }
+
+    - key: weekly-br-wins-3
+      objective: MINIGAME_STAT
+      target: 3
+      xp: 100
+      icon: generic
+      filter: { game: "formula-boat-racing", stat: "wins" }
+      title: { pl: "Wygraj 3 wyścigi łodzi", en: "Win 3 boat races" }
+
+    - key: weekly-br-finishes-15
+      objective: MINIGAME_STAT
+      target: 15
+      xp: 80
+      icon: generic
+      filter: { game: "formula-boat-racing", stat: "races" }
+      title: { pl: "Ukończ 15 wyścigów łodzi", en: "Finish 15 boat races" }
+
+    # BoatRace reports the CURRENT run of ranked races finished without being last as best_streak after every
+    # ranked finish (a last place or leaving a race resets it): the report reaching 3 completes the mission.
+    - key: weekly-br-streak-3
+      objective: MINIGAME_STAT
+      target: 1
+      xp: 100
+      icon: generic
+      filter: { game: "formula-boat-racing", stat: "best_streak", min-value: 3 }
+      title: { pl: "Ukończ 3 wyścigi łodzi z rzędu, nie będąc ostatnim", en: "Finish 3 boat races in a row without being last" }
+
+  season:
+    - key: season-days-20
+      objective: DISTINCT_DAYS
+      target: 20
+      xp: 300
+      icon: login
+      title: { pl: "Graj w 20 różnych dni", en: "Play on 20 different days" }

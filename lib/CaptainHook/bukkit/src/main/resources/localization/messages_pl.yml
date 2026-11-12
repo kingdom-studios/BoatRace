@@ -1,0 +1,304 @@
+# !-----------------------------------------------------------------------------------------------!
+#                              Welcome to the localization file.
+# !-----------------------------------------------------------------------------------------------!
+#
+#   The localization/ folder stores various localization files. Use the suggested naming
+#   convention message_LANGUAGE.yml and then the "SimpleLocalization" or the "Lang" class to
+#   use this file.
+#
+#   1) COLOR CODES are supported with the '&' character.
+#      - For usage, see http://minecraftwiki.net/wiki/Formatting_codes
+#      - When you use them, place quotes around the message like this: "Hello &cworld."
+#       - To use HEX colors, use #123456 syntax: "Hello #123456world."
+#
+#   2) TO HIDE any message, set it to 'none'.
+#
+#   3) For UNICODE CHARACTERS (smileys, symbols, ..), save the file in UTF-8 encoding. See
+#      - https://github.com/${author}/${project.name}/wiki/Use-Right-Encoding
+#
+#   4) JSON is supported. Prepend the message with [JSON].
+#
+#   5) JAVASCRIPT NOTICE: Some of our messages are just-in-time compiled with JavaScript.
+#      Those typically have variables such as "self" inside of them. IF YOU CANNOT CODE
+#      in JavaScript, be extra careful and do not remove () brackets or the variables!
+#
+# !-----------------------------------------------------------------------------------------------!
+
+# -------------------------------------------------------------------------------------------------
+# Messages related to commands
+# -------------------------------------------------------------------------------------------------
+Commands: 
+  Error: "&4&lUps! &cKomenda nie powiodła się. Zgłoś to administracji."
+  Header_No_Subcommands: "&cThere are no arguments for this command."
+  Header_No_Subcommands_Permission: "&cYou don't have permissions to view any subcommands."
+  Header_Color: GOLD
+  Header_Secondary_Color: RED
+  Header_Format: "&r\n{theme_color}&m<center>&r{theme_color} {title} &m\n&r"
+  # Must be exactly one letter
+  Header_Center_Letter: "-"
+  Header_Center_Padding: 120
+  Reloading: "reloading"
+  Disabled: "disabled"
+  Use_While_Null: "&cCannot use this command while the plugin is {state}."
+  Cannot_Autodetect_World: "Only living players can use ~ for their world!"
+  Incompatible: "This command requires Minecraft {0} or greater."
+  Toggled_Plugin_Part: "'&7You are ' + (ignoring ? '&2no longer' : '&cnow') + ' &7ignoring {0}.'"
+  Use_Alternative_Header: false
+  Alternative_Header: "&c{plugin_name}: &7Type '/{0} ?' to see all commands."
+  No_Console: "&cTej komendy może użyć tylko gracz."
+  No_BungeeCord: "You need BungeeCord enabled use this feature."
+  Console_Missing_Player_Name: "When running from console, specify player name."
+  Cooldown_Wait: "&cOdczekaj {duration} s przed ponownym użyciem tej komendy."
+  Invalid_Argument: "&cNieprawidłowy argument. Użyj &6/{label} ? &cpo pomoc."
+  Invalid_Sub_Argument: "&cInvalid argument. Run '/{label} {0}' for help."
+  Invalid_Argument_Multiline: "&cInvalid argument. Usage:"
+  Invalid_Time: "Expected time such as '3 hours' or '15 minutes', got: '{input}'"
+  Invalid_Number: "The number must be a whole or a decimal number. Got: '{input}'"
+  Invalid_String: "&cInvalid string. Got: '{input}&c'"
+  Invalid_World: "Invalid world '{world}'. Available: {available}"
+  Label_Authors: "Made by"
+  Label_Description: "&c&lDescription:"
+  Label_Optional_Args: "optional arguments"
+  Label_Required_Args: "required arguments"
+  Label_Usage: "&c&lUsage:"
+  Label_Help_For: "Help for /{label}"
+  Label_Subcommand_Description: " &f/{label} {sublabel} {usage+}{dash+}{description}"
+  Help_Tooltip_Description: "&7Description: &f{description}"
+  Help_Tooltip_Permission: "&7Permission: &f{permission}"
+  Help_Tooltip_Usage: "&7Usage: &f"
+  Reload_Description: "Reload the configuration."
+  Reload_Started: "Reloading plugin's data, please wait.."
+  Reload_Success: "&6{plugin_name} {plugin_version} has been reloaded."
+  Reload_Fail: "&4Oups, &creloading failed! See the console for more information. Error: {error}"
+  Reload_File_Load_Error: "&4Oups, &cthere was a problem loading files from your disk! See the console for more information. {plugin_name} has not been reloaded."
+  Debug_Description: "ZIP your settings for reporting bugs."
+  Debug_Preparing: "&6Preparing debug log..."
+  Debug_Success: "&2Successfuly copied {amount} file(s) to debug.zip. Your sensitive MySQL information has been removed from yml files. Please upload it via ufile.io and send it to us for review."
+  Debug_Copy_Fail: "&cCopying files failed on file {file} and it was stopped. See console for more information."
+  Debug_Zip_Fail: "&cCreating a ZIP of your files failed, see console for more information. Please ZIP debug/ folder and send it to us via ufile.io manually."
+  Perms_Description: "List all permissions the plugin has."
+  Perms_Usage: 
+  Perms_Header: "Listing All Plugin Permissions"
+  Perms_Main: "Main"
+  Perms_Permissions: "Permissions:"
+  Perms_True_By_Default: "&7[true by default]"
+  Perms_Info: "&7Info: &f"
+  Perms_Default: "&7Default? "
+  Perms_Applied: "&7Do you have it? "
+  Perms_Yes: "&2yes"
+  Perms_No: "&cno"
+  Region_Set_Primary: "Set the primary region point."
+  Region_Set_Secondary: "Set the secondary region point."
+
+# -------------------------------------------------------------------------------------------------
+# Messages related to paginator splitting command help into multiple pages
+# -------------------------------------------------------------------------------------------------
+Pages:
+  No_Page_Number: "&cPlease specify the page number for this command."
+  No_Pages: "&cYou do not have any pages saved to show."
+  No_Page: "Pages do not contain the given page number."
+  Invalid_Page: "&cYour input '{input}' is not a valid number."
+  Go_To_Page: "&7Go to page {page}"
+  Go_To_First_Page: "&7Go to the first page"
+  Tooltip:
+  - "&7You can also navigate using the"
+  - "&7hidden '/#flp <page> command.'"
+  
+# -------------------------------------------------------------------------------------------------
+# Messages related to players
+# -------------------------------------------------------------------------------------------------
+Player: 
+  Not_Online: "&cPlayer {player} &cis not online on this server."
+  Not_Played_Before: "&cPlayer {player} &chas not played before or we could not locate his disk data."
+  Invalid_UUID: "&cCould not find a player from UUID {uuid}."
+  
+# -------------------------------------------------------------------------------------------------
+# Messages related to menus
+# -------------------------------------------------------------------------------------------------
+Menu:
+  Cannot_Open_During_Conversation: "&cType 'exit' to quit your conversation before opening menu."
+  Item_Deleted: "&2The {item} has been deleted."
+  Error: "&cOups! There was a problem with this menu! Please contact the administrator to review the console for details."
+  Page_Previous: "&8<< &fPage {page}"
+  Page_Next: "Page {page} &8>>"
+  Page_First: "&7First Page"
+  Page_Last: "&7Last Page"
+  Title_Tools: "Tools Menu"
+  Tooltip_Info: "&fMenu Information"
+  Button_Return_Title: "&4&lReturn"
+  Button_Return_Lore:
+  - ""
+  - "Return back."
+
+# -------------------------------------------------------------------------------------------------
+# Messages related to player conversation where server is waiting for his chat input
+# -------------------------------------------------------------------------------------------------
+Conversation:
+  Not_Conversing: "&cYou can only use this command when you are asked to type something in the chat."
+  Requires_Player: "Only players may enter this conversation."
+  Error: "&cOups! There was a problem in this conversation! Please contact the administrator to review the console for details."
+  Conversation_Cancelled: "Your pending chat answer has been canceled."
+  Conversation_Cancelled_Inactive: "Your pending chat answer has been canceled because you were inactive."
+
+# -------------------------------------------------------------------------------------------------
+# Messages related to tools
+# -------------------------------------------------------------------------------------------------
+Tool:
+  Error: "&cOups! There was a problem with this tool! Please contact the administrator to review the console for details."
+
+# -------------------------------------------------------------------------------------------------
+# Words for both singular and plural form. Separate these two forms with ", "
+# -------------------------------------------------------------------------------------------------
+Cases:
+  Second: second, seconds
+  Minute: minute, minutes
+  Hour: hour, hours
+  Day: day, days
+  Week: week, weeks
+  Month: month, months
+  Year: year, years
+
+# -------------------------------------------------------------------------------------------------
+# Different prefixes you can use by calling {prefix_<type>} such as {prefix_info}
+# -------------------------------------------------------------------------------------------------
+Prefix:
+  Info: "&8&l[&9&li&8&l]&7"
+  Success: "&8&l[&2&l!&8&l]&7"
+  Warn: "&8&l[&6&l!&8&l]&6"
+  Error: "&8&l[&4&lX&8&l]&c"
+  Question: "&8&l[&a&l?&8&l]&7"
+  Announce: "&8&l[&5&l!&8&l]&d"
+
+# -------------------------------------------------------------------------------------------------
+# Miscellaneous
+# -------------------------------------------------------------------------------------------------
+None: "None"
+Server_Prefix: "[Server]"
+Console_Name: "Console"
+
+# -------------------------------------------------------------------------------------------------
+# Database related messages
+# -------------------------------------------------------------------------------------------------
+Data_Missing: "&c{name} lacks database information! Please only create {type} in-game! Skipping.."
+Data_Loading: "Database is currently loading data, please wait..."
+
+# -------------------------------------------------------------------------------------------------
+# Messages shown when player runs a command he lacks permission for
+# -------------------------------------------------------------------------------------------------
+No_Permission: "&cBrak uprawnień: {permission}"
+
+# -------------------------------------------------------------------------------------------------
+# Łączenie konta z kingdomcraft.pl (/link). {username} = nazwa konta na stronie.
+# -------------------------------------------------------------------------------------------------
+Link:
+  Description: "Połącz konto Minecraft z kontem na kingdomcraft.pl."
+  Status_Linked: "&7Twoje konto jest połączone z kontem &f{username}&7 na kingdomcraft.pl."
+  Status_Not_Linked: "&7Twoje konto nie jest połączone. Wygeneruj kod na &fkingdomcraft.pl&7 i wpisz &f/link <kod>&7."
+  Invalid_Format: "&cKod musi składać się z dokładnie 6 cyfr."
+  Verifying: "&7Weryfikuję kod..."
+  Success: "&aPołączono! Twoje konto jest teraz powiązane z kontem &f{username}&a na kingdomcraft.pl."
+  Invalid_Code: "&cKod jest nieprawidłowy lub wygasł. Wygeneruj nowy na stronie."
+  Nickname_Mismatch: "&cTen kod został wygenerowany dla innego nicku."
+  Already_Linked: "&cTo konto Minecraft jest już połączone z innym kontem na stronie."
+  Rate_Limited: "&cZa dużo prób. Spróbuj ponownie za minutę."
+  Config_Error: "&cBłąd konfiguracji serwera. Zgłoś to administracji."
+  Unavailable: "&cStrona jest chwilowo niedostępna. Spróbuj ponownie później."
+
+# -------------------------------------------------------------------------------------------------
+# KingdomCoins. {balance} i {amount} są formatowane ze spacjami co 3 cyfry.
+# -------------------------------------------------------------------------------------------------
+KingdomCoins:
+  Description_Balance: "Pokaż saldo KingdomCoinów swoje lub innego gracza."
+  Description_Pay: "Przelej KingdomCoiny innemu graczowi."
+  Description_Top: "Ranking najbogatszych graczy."
+  Description_Give: "Dodaj KingdomCoiny graczowi."
+  Description_Take: "Zabierz KingdomCoiny graczowi."
+  Description_Set: "Ustaw saldo KingdomCoinów gracza."
+  Description_History: "Historia transakcji KingdomCoinów gracza."
+  Balance: "&7Masz &6{balance} KC&7."
+  Balance_Other: "&7Gracz &f{player}&7 ma &6{balance} KC&7."
+  Balance_Changed: "&7Twoje saldo KingdomCoinów wynosi teraz &6{balance} KC&7."
+  Loading: "&7Twoje saldo KingdomCoinów jeszcze się wczytuje, spróbuj za chwilę."
+  Player_Not_Found: "&cGracz {player} nigdy nie grał na serwerze."
+  Invalid_Amount: "&cIlość musi być liczbą całkowitą od {min} do {max}."
+  Invalid_Page: "&cNumer strony musi być liczbą większą od 0."
+  Not_Enough: "&cNie masz wystarczająco KingdomCoinów."
+  Pay_Self: "&cNie możesz przelać KingdomCoinów samemu sobie."
+  Pay_Sent: "&7Przelano &6{amount} KC&7 graczowi &f{player}&7. Twoje saldo: &6{balance} KC&7."
+  Pay_Received: "&7Otrzymano &6{amount} KC&7 od gracza &f{player}&7."
+  Top_Header: "&6&lNajbogatsi gracze &7(KingdomCoins)"
+  Top_Line: "&7{position}. &f{player} &8- &6{balance} KC"
+  Top_Empty: "&7Ranking jest jeszcze pusty."
+  Admin_Give: "&7Dodano &6{amount} KC&7 graczowi &f{player}&7. Saldo: &6{balance} KC&7."
+  Admin_Take: "&7Zabrano &6{amount} KC&7 graczowi &f{player}&7. Saldo: &6{balance} KC&7."
+  Admin_Set: "&7Ustawiono saldo gracza &f{player}&7 na &6{balance} KC&7."
+  Admin_Not_Enough: "&cGracz {player} ma za mało KingdomCoinów."
+  History_Header: "&6&lHistoria KC: &f{player} &7(strona {page})"
+  History_Line: "&8{date} &7{type} &f{amount} &8» &6{balance} &8[{server}] &7{reason}"
+  History_Empty: "&7Brak transakcji na tej stronie."
+  Database_Error: "&cKingdomCoiny są chwilowo niedostępne. Spróbuj ponownie później."
+
+# -------------------------------------------------------------------------------------------------
+# Karnet sezonowy. {season} = nazwa sezonu, {level} = nowy poziom.
+# -------------------------------------------------------------------------------------------------
+Pass:
+  Level_Up: "&6Karnet {season}&7: osiągnięto poziom &f{level}&7!"
+  Level_Up_Title: "&6Poziom {level}!"
+  Level_Up_Subtitle: "&7Karnet: &f{season}"
+  Level_Up_Link: "&e&n[Odbierz nagrody na stronie]"
+  Level_Up_Hover: "&7Otwiera stronę karnetu"
+
+# -------------------------------------------------------------------------------------------------
+# Misje karnetu sezonowego (/karnet). {title} = tytuł misji, {xp} = nagroda w XP, {url} = strona z nagrodami.
+# -------------------------------------------------------------------------------------------------
+Mission:
+  Completed: "&6Misja ukończona: &f{title} &a+{xp} XP"
+  Completed_No_Xp: "&6Misja ukończona: &f{title}"
+  Description: "Pokaż poziom karnetu i dzisiejsze misje."
+  No_Season: "&7Teraz nie trwa żaden sezon karnetu."
+  Unavailable: "&cKarnet jest chwilowo niedostępny. Spróbuj ponownie później."
+  Status: "&6Karnet {season}&7: poziom &f{level}&7/&f{max} &8| &7XP: &f{xp} &8| &7do poziomu {next}: &f{togo} XP"
+  Status_Max: "&6Karnet {season}&7: &fmaksymalny poziom &8| &7XP: &f{xp}"
+  Header_Daily: "&6Dzienne &7(reset za {reset})"
+  Header_Weekly: "&6Tygodniowe &7(reset za {reset})"
+  Header_Season: "&6Sezonowe &7(do końca sezonu)"
+  Line: "&8- &f{title} &7{progress}/{target}{unit} &a+{xp} XP"
+  Line_Done: "&8- &a✔ &7&m{title}&r &a+{xp} XP"
+  Empty: "&8- &7brak misji"
+  Claim_Hint: "&7Nagrody odbierzesz na stronie: &e{url}"
+  Admin_Usage: "&c/{label} admin xp <add|set> <gracz> <ilość> | mission complete <gracz> <id> | progress <gracz> <cel> <ilość> | rotate <daily|weekly> | reload"
+  Admin_Done: "&a{message}"
+  Admin_Failed: "&c{error}"
+
+# -------------------------------------------------------------------------------------------------
+# Osiągnięcia (achievements.yml na proxy). {name} i {description} pochodzą z tego pliku.
+# -------------------------------------------------------------------------------------------------
+Achievement:
+  Unlocked: "&6Osiągnięcie odblokowane: &f{name}&7 - {description}"
+
+# -------------------------------------------------------------------------------------------------
+# Nagrody-komendy (osiągnięcia, karnet, odbiór na stronie). Received_Prefix stoi przed wiadomością nagrody.
+# -------------------------------------------------------------------------------------------------
+Reward:
+  Received: "&aOdebrano nagrodę! Sprawdź ekwipunek."
+  Received_Prefix: "&aOdebrano nagrodę: &f"
+
+# -------------------------------------------------------------------------------------------------
+# Administracja pluginem (/captainhook). Baza danych jest na proxy: /captainhookproxy.
+# -------------------------------------------------------------------------------------------------
+Admin:
+  Description_Status: "Pokaż stan połączenia z proxy i synchronizacji statystyk."
+  Status_Proxy:
+  - "&7Serwer: &f{server}"
+  - "&7Proxy: &f{proxy}"
+  - "&7Baza danych proxy: &f{database}"
+  - "&7Statystyki w kolejce do wysłania: &f{pending}"
+  - "&7Wiadomości czekające na gracza: &f{queued}"
+  Proxy_Connected: "&apołączono&7 (CaptainHook {version}, ten serwer to &f{name}&7)"
+  Proxy_No_Carrier: "&ebrak gracza, który przeniesie wiadomość (pusty serwer albo brak CaptainHook na proxy)"
+  Proxy_Error: "&cbłąd: {error}"
+
+# -------------------------------------------------------------------------------------------------
+# Internal versioning number
+# -------------------------------------------------------------------------------------------------
+Version: 1

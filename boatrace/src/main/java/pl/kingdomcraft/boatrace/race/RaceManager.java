@@ -26,7 +26,10 @@ import org.bukkit.entity.Boat;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Vehicle;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.meta.LeatherArmorMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -39,7 +42,15 @@ import pl.kingdomcraft.boatrace.arena.ArenaManager;
 import pl.kingdomcraft.boatrace.arena.Point;
 import pl.kingdomcraft.boatrace.arena.Region;
 import pl.kingdomcraft.boatrace.arena.Zone;
+import pl.kingdomcraft.boatrace.captainhook.CaptainHookHook;
+import pl.kingdomcraft.boatrace.luckperms.LuckPermsHook;
 import pl.kingdomcraft.boatrace.party.PartyManager;
+import pl.kingdomcraft.boatrace.team.TeamColor;
+import pl.kingdomcraft.boatrace.team.Lineups;
+import pl.kingdomcraft.boatrace.team.LobbyFill;
+import pl.kingdomcraft.boatrace.team.TeamScoring;
+import pl.kingdomcraft.boatrace.ranking.Elo;
+import pl.kingdomcraft.boatrace.storage.PlayerRating;
 import pl.kingdomcraft.boatrace.spectate.SpectateManager;
 import pl.kingdomcraft.boatrace.storage.RaceRecord;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
@@ -66,6 +77,10 @@ import pl.kingdomcraft.boatrace.util.TimeFmt;
 public final class RaceManager {
 
 	private static final String ADMIN_PERMISSION = "boatrace.admin";
+	/** spared from the competitive leaver penalty and cooldown (testing) */
+	public static final String COMP_BYPASS_PERMISSION = "boatrace.competitive.bypass";
+	/** longest distance a boat can sail between two move events (blue ice is about 4 blocks per tick) */
+	private static final double MAX_MOVE_BLOCKS = 10.0D;
 
 	/** Outcome of {@link #join(Player, Arena)}; the racer has already been told about failures. */
 	public enum JoinResult {
@@ -143,7 +158,23 @@ public final class RaceManager {
 	private long queueTicker;
 	private boolean processingQueues;
 	private boolean shuttingDown;
+	/** /bre reload or a server stop sends everybody away: nobody loses ranking points for that */
+	private boolean massLeave;
 	private SpectateManager spectate;
+	private CaptainHookHook captainHook;
+	private LuckPermsHook luckPerms;
+
+	/** competitive lobbies: teams waiting, first come first served (lobby = arena, or "*" for any arena) */
+	private final List<CompEntry> compQueue = new ArrayList<>();
+	/** lobby key -> epoch ms when its countdown ends */
+	private final Map<String, Long> compCountdowns = new HashMap<>();
+	/** lobbies told that every fitting track is busy (once) */
+	private final Set<String> compWaitingForTrack = new java.util.HashSet<>();
+	/** player -> epoch ms until which they may not queue for competitive (left a running match) */
+	private final Map<UUID, Long> leaverCooldowns = new HashMap<>();
+	/** same lineup bonus, in memory */
+	private final Lineups lineups = new Lineups();
+	private boolean processingComp;
 
 	/** A queued player or party: the owner is the player who picked the map (the party leader). */
 	private static final class QueueEntry {
@@ -164,6 +195,16 @@ public final class RaceManager {
 		this.storage = storage;
 		this.parties = parties;
 		this.itemKey = new NamespacedKey(plugin, "race_item");
+	}
+
+	/** Team tag as LuckPerms meta (optional). */
+	public void setLuckPerms(final LuckPermsHook luckPerms) {
+		this.luckPerms = luckPerms;
+	}
+
+	/** Race stats and season pass XP for CaptainHook (optional). */
+	public void setCaptainHook(final CaptainHookHook captainHook) {
+		this.captainHook = captainHook;
 	}
 
 	public void setSpectate(final SpectateManager spectate) {
@@ -195,8 +236,15 @@ public final class RaceManager {
 	}
 
 	private void leaveAll(final LeaveMode mode) {
-		for (final RaceSession session : new ArrayList<>(this.sessions.values()))
-			this.dispose(session, mode);
+		this.massLeave = true;
+
+		try {
+			for (final RaceSession session : new ArrayList<>(this.sessions.values()))
+				this.dispose(session, mode);
+
+		} finally {
+			this.massLeave = false;
+		}
 
 		// empty event lobbies (and anything left over) - restores WORLD start signals
 		for (final Heat heat : new ArrayList<>(this.heats.values()))
@@ -208,6 +256,17 @@ public final class RaceManager {
 	// ------------------------------------------------------------------------------------------
 	// Public API (commands / listener / placeholders)
 	// ------------------------------------------------------------------------------------------
+
+	/**
+	 * The tab list group of a player: the instance ("arena@world") of the race they are in - solo, event, party or
+	 * competitive, also while waiting on the grid or after the finish - or null when they are not in a race (lobby).
+	 */
+	public String tabGroupOf(final UUID uuid) {
+		final RaceSession session = this.sessions.get(uuid);
+		final Heat heat = session != null && !session.disposed ? session.heat : null;
+
+		return heat != null ? heat.key : null;
+	}
 
 	public boolean isRacing(final Player player) {
 		return this.sessions.containsKey(player.getUniqueId());
@@ -279,7 +338,13 @@ public final class RaceManager {
 			return JoinResult.PARTY_BLOCKED;
 		}
 
-		return this.joinGroup(this.parties.groupOf(player), arena, laps, true, true);
+		final List<Player> group = this.parties.groupOf(player);
+
+		// a normal race replaces a place in a competitive lobby
+		for (final Player member : group)
+			this.removeFromCompQueue(member.getUniqueId(), true);
+
+		return this.joinGroup(group, arena, laps, true, true);
 	}
 
 	/**
@@ -480,6 +545,9 @@ public final class RaceManager {
 
 		else if (this.dequeue(player.getUniqueId()))
 			Msg.send(player, "queue.left");
+
+		else if (this.removeFromCompQueue(player.getUniqueId(), true))
+			Msg.send(player, "comp.queue-left");
 	}
 
 	// ------------------------------------------------------------------------------------------
@@ -971,6 +1039,9 @@ public final class RaceManager {
 		this.heats.remove(heat.key);
 
 		this.scheduleQueueProcessing();
+
+		if (!this.compQueue.isEmpty() && !this.shuttingDown && this.plugin.isEnabled())
+			Bukkit.getScheduler().runTask(this.plugin, this::processCompetitive);
 	}
 
 	private void dispose(final RaceSession s, final LeaveMode mode) {
@@ -979,7 +1050,36 @@ public final class RaceManager {
 
 		s.disposed = true;
 		this.sessions.remove(s.playerId);
+
+		// Leaving a ranked race before the finish = behind everybody still racing (and a broken "not last" streak)
+		final Heat heat = s.heat;
+		final boolean teamRace = heat != null && heat.competitive;
+		// competitive: leaving during the start lights abandons the team as well
+		final boolean dnf = heat != null && !this.massLeave
+				&& (s.state == RaceSession.State.RUNNING && heat.ranked && !heat.rankingSettled
+						|| teamRace && !heat.teamSettled && (s.state == RaceSession.State.RUNNING || s.state == RaceSession.State.COUNTDOWN));
+
+		if (dnf) {
+			final Player leaving = Bukkit.getPlayer(s.playerId);
+			final String name = leaving != null ? leaving.getName() : this.storage.getRating(s.playerId, "?").name();
+
+			heat.dnf.add(new Heat.Result(s.playerId, name, 0L, 0L));
+
+			if (!this.storage.isBlacklisted(s.playerId) && (heat.ranked || teamRace && heat.fieldSize >= this.settings.rankingMinRacers))
+				this.storage.recordRankedResult(s.playerId, name, false, false);
+
+			if (teamRace)
+				this.punishLeaver(s.playerId, name, leaving);
+		}
+
 		this.detach(s);
+
+		if (dnf)
+			this.settle(heat);
+
+		// the armor goes with the inventory snapshot below, the transient tag has to be removed here
+		if (teamRace && this.luckPerms != null)
+			this.luckPerms.clearMeta(s.playerId, this.settings.teamMetaKey);
 
 		final Player player = Bukkit.getPlayer(s.playerId);
 
@@ -1040,6 +1140,7 @@ public final class RaceManager {
 		s.finalMs = 0L;
 		s.deltaText = "";
 		s.restartQueued = false;
+		s.runDistance = 0.0D;
 		s.lastTrackPos = null;
 		s.offTrack = false;
 		s.offTrackTicks = 0;
@@ -1228,12 +1329,14 @@ public final class RaceManager {
 		heat.phase = Heat.Phase.RACING;
 		heat.startNanos = System.nanoTime();
 		heat.fieldSize = heat.slots.size();
+		heat.ranked = this.isRanked(heat);
 
 		for (final RaceSession racer : heat.racers()) {
 			if (racer.state != RaceSession.State.COUNTDOWN)
 				continue;
 
 			racer.state = RaceSession.State.RUNNING;
+			racer.runDistance = 0.0D;
 			racer.restartFailures = 0;
 
 			// Fallback for a misconfigured spawn that lies inside the start line: the racer is already on the line
@@ -1439,6 +1542,8 @@ public final class RaceManager {
 		if (start == null || finish == null)
 			return;
 
+		this.trackDistance(s, from, to);
+
 		// Edge detection: "entered" = was outside after the previous move and touches the zone during this one
 		final boolean startEntered = !s.inStartZone && start.intersects(from, to);
 		final boolean finishEntered = !s.inFinishZone && finish.intersects(from, to);
@@ -1490,6 +1595,22 @@ public final class RaceManager {
 	}
 
 	/**
+	 * Blocks sailed (horizontal). A jump longer than a boat can sail in one move is a teleport (rescue, restart) and
+	 * does not count.
+	 */
+	private void trackDistance(final RaceSession s, final Location from, final Location to) {
+		if (from.getWorld() != to.getWorld())
+			return;
+
+		final double dx = to.getX() - from.getX();
+		final double dz = to.getZ() - from.getZ();
+		final double moved = Math.sqrt(dx * dx + dz * dz);
+
+		if (moved < MAX_MOVE_BLOCKS)
+			s.runDistance += moved;
+	}
+
+	/**
 	 * Silent: no chat and no checkpoint text. Only the delta to the personal best is updated - it stays on the
 	 * action bar next to the running time until the next checkpoint replaces it.
 	 */
@@ -1529,8 +1650,8 @@ public final class RaceManager {
 	}
 
 	/** "Lap 2/5 | " for multi-lap races, "" for single-lap ones (messages.yml actionbar.lap). */
-	private static String lapText(final RaceSession s) {
-		return s.heat.laps > 1 ? Msg.text("actionbar.lap", "lap", Math.min(s.lap, s.heat.laps), "laps", s.heat.laps) : "";
+	private String lapText(final RaceSession s) {
+		return this.teamText(s) + (s.heat.laps > 1 ? Msg.text("actionbar.lap", "lap", Math.min(s.lap, s.heat.laps), "laps", s.heat.laps) : "");
 	}
 
 	private void finish(final RaceSession s, final Player player) {
@@ -1577,11 +1698,26 @@ public final class RaceManager {
 				"reward_note", rewarded ? Msg.text("finish.reward-note", "arena", arena) : "",
 				"event_note", heat.event ? Msg.text("finish.event-note", "position", position, "racers", heat.fieldSize) : "");
 
+		// Ranked race (casual ranked or competitive): games, the racer's own 1st place and the "not last" streak are
+		// decided right now - everybody still racing will be behind. The rating itself moves when the race is settled.
+		final boolean competitive = heat.competitive;
+		final boolean placed = !blacklisted && (heat.ranked || competitive && heat.fieldSize >= this.settings.rankingMinRacers);
+		final PlayerRating rating = placed ? this.storage.recordRankedResult(s.playerId, player.getName(), position < heat.fieldSize, position == 1)
+				: this.storage.getRating(s.playerId, player.getName());
+		final double xpBoost = competitive ? this.settings.compXpMultiplier * heat.xpBoost.getOrDefault(s.playerId, 1.0D) : 1.0D;
+
+		if (this.captainHook != null && !blacklisted)
+			this.captainHook.reportFinish(player, new CaptainHookHook.FinishReport(CaptainHookHook.trackId(arena), heat.laps, heat.laps == heat.arena.getLaps(),
+					s.finalMs, s.finalMs - s.penaltyMs, lapTimes(s), s.runDistance, placed, placed ? position : 0, placed ? rating.streak() : -1,
+					rating.rating(), newBest && heat.laps == 1, xpBoost));
+
 		// Shown on the action bar while waiting for the teleport
 		s.deltaText = previousBest > 0L ? deltaText(deltaMs) : "";
 
 		Msg.title(player, "finish", "time", TimeFmt.format(s.finalMs), "arena", arena, "laps", heat.laps);
 		this.settings.soundFinish.play(player);
+
+		this.settle(heat);
 
 		if (heat.privateHeat)
 			// a party member stays on the map (free to move around) until the whole party has finished
@@ -1593,6 +1729,857 @@ public final class RaceManager {
 				if (!s.disposed && s.state == RaceSession.State.FINISHED && this.sessions.get(s.playerId) == s)
 					this.dispose(s, LeaveMode.HUB);
 			});
+	}
+
+	/** Official time of every lap: from the lap lines in the splits, the last lap ends with the finish. */
+	private static long[] lapTimes(final RaceSession s) {
+		final int laps = s.heat.laps;
+		final long[] times = new long[laps];
+		long previous = 0L;
+
+		for (int lap = 1; lap <= laps; lap++) {
+			final int index = (lap - 1) * (s.cpCount + 1) + s.cpCount;
+			final long end = lap == laps ? s.finalMs : index < s.splits.length ? s.splits[index] : 0L;
+
+			// a missing lap line (should not happen) makes the lap unusable instead of wrong
+			times[lap - 1] = end > previous ? end - previous : 0L;
+			previous = Math.max(previous, end);
+		}
+
+		return times;
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Ranking
+	// ------------------------------------------------------------------------------------------
+
+	/** Event and party races with enough racers at lights out; solo runs never count. */
+	private boolean isRanked(final Heat heat) {
+		return this.settings.rankingEnabled && heat.event && !heat.competitive && heat.fieldSize >= this.settings.rankingMinRacers
+				&& (!heat.privateHeat || this.settings.rankingPartyRaces);
+	}
+
+	/** Settles whatever the race still owes once nobody is racing: ranking points, team result. */
+	private void settle(final Heat heat) {
+		this.settleRanking(heat);
+		this.settleTeams(heat);
+	}
+
+	/**
+	 * Hands out the ranking points of a ranked race once nobody is racing any more. Order: finishers in finishing
+	 * order, then the racers who left (the last to leave first). Blacklisted players are left out.
+	 */
+	private void settleRanking(final Heat heat) {
+		if (!heat.ranked || heat.rankingSettled || this.massLeave)
+			return;
+
+		for (final RaceSession racer : heat.slots.values())
+			if (racer.state == RaceSession.State.RUNNING)
+				return;
+
+		heat.rankingSettled = true;
+
+		final List<UUID> order = new ArrayList<>();
+		final Map<UUID, String> names = new HashMap<>();
+		final List<Heat.Result> placed = new ArrayList<>(heat.results);
+
+		for (int i = heat.dnf.size() - 1; i >= 0; i--)
+			placed.add(heat.dnf.get(i));
+
+		for (final Heat.Result result : placed)
+			if (!this.storage.isBlacklisted(result.uuid()) && !names.containsKey(result.uuid())) {
+				order.add(result.uuid());
+				names.put(result.uuid(), result.name());
+			}
+
+		if (order.size() < 2)
+			return;
+
+		final Map<UUID, Integer> before = new HashMap<>();
+
+		for (final UUID uuid : order)
+			before.put(uuid, this.storage.getRating(uuid, names.get(uuid)).rating());
+
+		final Map<UUID, Integer> deltas = Elo.deltas(order, before, this.settings.rankingK);
+
+		this.storage.addRatings(deltas, names);
+
+		final Map<UUID, Integer> after = new HashMap<>();
+
+		for (final UUID uuid : order) {
+			final int rating = this.storage.getRating(uuid, names.get(uuid)).rating();
+			final Player player = Bukkit.getPlayer(uuid);
+
+			after.put(uuid, rating);
+
+			if (player != null) {
+				final int change = rating - before.get(uuid);
+
+				Msg.send(player, "ranking.change", "rating", rating, "delta", change > 0 ? "&a+" + change : change < 0 ? "&c" + change : "&7+0",
+						"rank", this.storage.getRatingRank(uuid));
+			}
+		}
+
+		if (this.captainHook != null)
+			this.captainHook.reportRatings(after);
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Competitive (team against team, from a lobby)
+	// ------------------------------------------------------------------------------------------
+
+	public enum CompJoinResult {
+		QUEUED, DISABLED, NOT_LEADER, TOO_BIG, BANNED, BUSY, COOLDOWN, NO_ARENA
+	}
+
+	/** One team waiting in a competitive lobby: a party, or a solo player (a team of 1). */
+	private static final class CompEntry {
+
+		final UUID leader;
+		/** the leader first; a party never changes while queued (it is dropped instead) */
+		final List<UUID> members;
+		/** arena name, null = any competitive arena */
+		final String arena;
+
+		CompEntry(final UUID leader, final List<UUID> members, final String arena) {
+			this.leader = leader;
+			this.members = members;
+			this.arena = arena;
+		}
+
+		String key() {
+			return lobbyKey(this.arena);
+		}
+	}
+
+	/** A lobby somebody waits in, for /bre ranked list and the GUI. */
+	public record CompLobbyInfo(String arena, int players, int teams, int min, int max, int countdown) {
+	}
+
+	private static String lobbyKey(final String arena) {
+		return arena == null ? "*" : arena.toLowerCase(Locale.ROOT);
+	}
+
+	public boolean hasCompetitiveBypass(final Player player) {
+		return player.hasPermission(COMP_BYPASS_PERMISSION);
+	}
+
+	/**
+	 * Puts the player - or their whole party, which always plays as ONE team - in a competitive lobby.
+	 *
+	 * @param arena null = any competitive arena
+	 */
+	public CompJoinResult joinCompetitive(final Player player, final Arena arena) {
+		if (!this.settings.compEnabled) {
+			Msg.send(player, "comp.disabled");
+			return CompJoinResult.DISABLED;
+		}
+
+		if (this.parties.isFollower(player)) {
+			Msg.send(player, "party.only-leader-join");
+			return CompJoinResult.NOT_LEADER;
+		}
+
+		final List<Player> group = this.parties.groupOf(player);
+
+		if (group.size() > this.settings.compMaxTeamSize) {
+			Msg.send(player, "comp.party-too-big", "size", group.size(), "max", this.settings.compMaxTeamSize);
+			return CompJoinResult.TOO_BIG;
+		}
+
+		final long now = System.currentTimeMillis();
+
+		for (final Player member : group) {
+			if (this.storage.isBlacklisted(member.getUniqueId())) {
+				Msg.send(player, group.size() > 1 ? "party.member-banned" : "race.banned", "player", member.getName());
+				return CompJoinResult.BANNED;
+			}
+
+			if (this.sessions.containsKey(member.getUniqueId())) {
+				Msg.send(player, "comp.member-busy", "player", member.getName());
+				return CompJoinResult.BUSY;
+			}
+
+			final Long until = this.leaverCooldowns.get(member.getUniqueId());
+
+			if (until != null && until > now && !this.hasCompetitiveBypass(member)) {
+				Msg.send(player, "comp.cooldown", "player", member.getName(), "minutes", Math.max(1L, (until - now + 59_999L) / 60_000L));
+				return CompJoinResult.COOLDOWN;
+			}
+		}
+
+		if (arena != null ? !this.fitsCompetitive(arena, group.size(), player) : this.compArenas(group.size()).isEmpty()) {
+			Msg.send(player, "comp.no-arena", "arena", arena != null ? arena.getName() : Msg.text("comp.any-arena"));
+			return CompJoinResult.NO_ARENA;
+		}
+
+		final List<UUID> members = new ArrayList<>();
+
+		for (final Player member : group) {
+			this.removeFromCompQueue(member.getUniqueId(), false);
+			this.dequeue(member.getUniqueId());
+			members.add(member.getUniqueId());
+		}
+
+		final CompEntry entry = new CompEntry(player.getUniqueId(), members, arena != null ? arena.getName() : null);
+
+		this.compQueue.add(entry);
+
+		final CompLobbyInfo info = this.lobbyInfo(entry.key());
+
+		for (final Player member : group)
+			Msg.send(member, "comp.queued", "arena", info.arena(), "players", info.players(), "min", info.min(), "max", info.max());
+
+		this.processCompetitive();
+
+		return CompJoinResult.QUEUED;
+	}
+
+	/** @return true if the player (or their party) was in a competitive lobby */
+	public boolean leaveCompetitive(final Player player) {
+		return this.removeFromCompQueue(player.getUniqueId(), true);
+	}
+
+	public boolean isInCompetitiveQueue(final UUID uuid) {
+		for (final CompEntry entry : this.compQueue)
+			if (entry.members.contains(uuid))
+				return true;
+
+		return false;
+	}
+
+	/** Every lobby somebody waits in, oldest first. */
+	public List<CompLobbyInfo> competitiveLobbies() {
+		final List<CompLobbyInfo> list = new ArrayList<>();
+		final Set<String> seen = new java.util.HashSet<>();
+
+		for (final CompEntry entry : this.compQueue)
+			if (seen.add(entry.key()))
+				list.add(this.lobbyInfo(entry.key()));
+
+		return list;
+	}
+
+	/** The lobby of an arena (null = the "any map" lobby). */
+	public CompLobbyInfo competitiveLobby(final String arena) {
+		return this.lobbyInfo(lobbyKey(arena));
+	}
+
+	private CompLobbyInfo lobbyInfo(final String key) {
+		int players = 0;
+		int teams = 0;
+
+		for (final CompEntry entry : this.compQueue)
+			if (entry.key().equals(key)) {
+				players += entry.members.size();
+				teams++;
+			}
+
+		final Long end = this.compCountdowns.get(key);
+		final int countdown = end == null ? -1 : (int) Math.max(0L, (end - System.currentTimeMillis() + 999L) / 1000L);
+		final Arena arena = "*".equals(key) ? null : this.arenas.get(key);
+
+		return new CompLobbyInfo(arena != null ? arena.getName() : Msg.text("comp.any-arena"), players, teams, this.lobbyMin(key), this.lobbyMax(key), countdown);
+	}
+
+	/** Racers needed for the countdown: the arena's min-players; the "any map" lobby takes the lowest of all arenas. */
+	private int lobbyMin(final String key) {
+		if (!"*".equals(key)) {
+			final Arena arena = this.arenas.get(key);
+
+			return arena != null ? arena.competitiveMin(this.settings.compMinPlayers) : this.settings.compMinPlayers;
+		}
+
+		int min = Integer.MAX_VALUE;
+
+		for (final Arena arena : this.compArenas(1))
+			min = Math.min(min, arena.competitiveMin(this.settings.compMinPlayers));
+
+		return min == Integer.MAX_VALUE ? this.settings.compMinPlayers : min;
+	}
+
+	/** Most racers of a match: the arena's max-players; the "any map" lobby takes the highest of all arenas. */
+	private int lobbyMax(final String key) {
+		if (!"*".equals(key)) {
+			final Arena arena = this.arenas.get(key);
+
+			return arena != null ? arena.competitiveMax() : 0;
+		}
+
+		int max = 0;
+
+		for (final Arena arena : this.compArenas(1))
+			max = Math.max(max, arena.competitiveMax());
+
+		return max;
+	}
+
+	/** Live team score for the action bar ({lap_text}): "Red 7.5 pts | " in a competitive match, "" otherwise. */
+	private String teamText(final RaceSession s) {
+		final Heat heat = s.heat;
+
+		if (heat == null || !heat.competitive)
+			return "";
+
+		final Integer team = heat.teamOf.get(s.playerId);
+
+		if (team == null || team >= heat.teamColors.size())
+			return "";
+
+		final List<UUID> order = new ArrayList<>(heat.results.size());
+
+		for (final Heat.Result result : heat.results)
+			order.add(result.uuid());
+
+		final double points = TeamScoring.liveAverage(order, heat.teamOf, team, this.settings.teamPoints);
+
+		return Msg.text("actionbar.team", "team", heat.teamColors.get(team).colored(),
+				"points", new TeamScoring.Standing(team, points, 0, 0).pointsText());
+	}
+
+	/** Team color of a racer of a running competitive match, or null (thread safe enough for placeholders). */
+	public TeamColor teamColorOf(final UUID uuid) {
+		final RaceSession session = this.sessions.get(uuid);
+		final Heat heat = session != null ? session.heat : null;
+
+		if (heat == null || !heat.competitive)
+			return null;
+
+		final Integer team = heat.teamOf.get(uuid);
+
+		return team != null && team < heat.teamColors.size() ? heat.teamColors.get(team) : null;
+	}
+
+	/** The team tag (competitive.luckperms.format) of a racer of a running competitive match, or "". */
+	public String teamTagOf(final UUID uuid) {
+		final TeamColor color = this.teamColorOf(uuid);
+
+		return color == null ? "" : this.teamTag(color);
+	}
+
+	private String teamTag(final TeamColor color) {
+		return this.settings.teamMetaFormat.replace("{chat}", color.chat()).replace("{name}", color.name()).replace("{id}", color.id());
+	}
+
+	/** The arena can host a competitive match with at least this many racers (and is open for the player). */
+	private boolean fitsCompetitive(final Arena arena, final int racers, final Player who) {
+		return arena.isReady() && arena.isCompetitive() && arena.competitiveMax() >= Math.max(2, racers)
+				&& (!arena.isMaintenance() || who != null && who.hasPermission(ADMIN_PERMISSION));
+	}
+
+	/** Open competitive arenas with room for at least this many racers. */
+	private List<Arena> compArenas(final int racers) {
+		final List<Arena> list = new ArrayList<>();
+
+		for (final Arena arena : this.arenas.readyArenas())
+			if (!arena.isMaintenance() && this.fitsCompetitive(arena, racers, null))
+				list.add(arena);
+
+		return list;
+	}
+
+	/**
+	 * Removes the entry the player is part of (a party leaves the lobby as a whole).
+	 *
+	 * @param notifyOthers tell the other members of the entry
+	 */
+	private boolean removeFromCompQueue(final UUID uuid, final boolean notifyOthers) {
+		for (final Iterator<CompEntry> it = this.compQueue.iterator(); it.hasNext();) {
+			final CompEntry entry = it.next();
+
+			if (!entry.members.contains(uuid))
+				continue;
+
+			it.remove();
+
+			if (notifyOthers)
+				for (final UUID member : entry.members)
+					if (!member.equals(uuid)) {
+						final Player other = Bukkit.getPlayer(member);
+
+						if (other != null)
+							Msg.send(other, "comp.queue-cancelled");
+					}
+
+			return true;
+		}
+
+		return false;
+	}
+
+	/** Still valid: everybody online and free, the party unchanged, the arena still there. */
+	private boolean isValid(final CompEntry entry) {
+		if (!this.settings.compEnabled || entry.members.size() > this.settings.compMaxTeamSize)
+			return false;
+
+		if (entry.arena != null && this.arenas.get(entry.arena) == null)
+			return false;
+
+		for (final UUID member : entry.members)
+			if (Bukkit.getPlayer(member) == null || this.sessions.containsKey(member) || this.storage.isBlacklisted(member))
+				return false;
+
+		final Set<UUID> now = new java.util.HashSet<>();
+
+		for (final Player member : this.parties.groupOf(Bukkit.getPlayer(entry.leader)))
+			now.add(member.getUniqueId());
+
+		return now.equals(new java.util.HashSet<>(entry.members));
+	}
+
+	/**
+	 * Once a second (and when a track becomes free): drops invalid entries, then for every lobby
+	 * - not enough racers (min-players) or fewer than 2 teams: no countdown (a running one is cancelled),
+	 * - enough: the countdown runs (competitive.countdown-seconds),
+	 * - full (max-players) or the countdown is over: the match starts on a free copy of the arena.
+	 */
+	private void processCompetitive() {
+		if (this.compQueue.isEmpty() && this.compCountdowns.isEmpty() || this.shuttingDown || this.processingComp)
+			return;
+
+		this.processingComp = true;
+
+		try {
+			for (final Iterator<CompEntry> it = this.compQueue.iterator(); it.hasNext();) {
+				final CompEntry entry = it.next();
+
+				if (!this.isValid(entry)) {
+					it.remove();
+
+					for (final UUID member : entry.members) {
+						final Player player = Bukkit.getPlayer(member);
+
+						if (player != null && !this.sessions.containsKey(member))
+							Msg.send(player, "comp.queue-cancelled");
+					}
+				}
+			}
+
+			final Map<String, List<CompEntry>> lobbies = new LinkedHashMap<>();
+
+			for (final CompEntry entry : this.compQueue)
+				lobbies.computeIfAbsent(entry.key(), key -> new ArrayList<>()).add(entry);
+
+			// lobbies that emptied: forget their countdown
+			this.compCountdowns.keySet().removeIf(key -> !lobbies.containsKey(key));
+			this.compWaitingForTrack.removeIf(key -> !lobbies.containsKey(key));
+
+			for (final Map.Entry<String, List<CompEntry>> lobby : lobbies.entrySet())
+				this.processLobby(lobby.getKey(), lobby.getValue());
+
+		} finally {
+			this.processingComp = false;
+		}
+	}
+
+	private void processLobby(final String key, final List<CompEntry> entries) {
+		final List<Integer> sizes = new ArrayList<>();
+
+		for (final CompEntry entry : entries)
+			sizes.add(entry.members.size());
+
+		final int max = this.lobbyMax(key);
+		final int min = this.lobbyMin(key);
+		final List<Integer> selected = LobbyFill.select(sizes, max, this.settings.teamColors.size(), this.settings.compMaxTeamSize);
+		final int players = LobbyFill.players(sizes, selected);
+		final boolean ready = selected.size() >= 2 && players >= min;
+		final long now = System.currentTimeMillis();
+		final Long end = this.compCountdowns.get(key);
+
+		if (!ready) {
+			if (end != null) {
+				this.compCountdowns.remove(key);
+				this.tellLobby(entries, "comp.countdown-cancelled", "players", players, "min", min);
+			}
+
+			return;
+		}
+
+		if (end == null) {
+			this.compCountdowns.put(key, now + this.settings.compCountdownSeconds * 1000L);
+			this.tellLobby(entries, "comp.countdown-started", "seconds", this.settings.compCountdownSeconds, "players", players, "max", max);
+
+			if (this.settings.compCountdownSeconds > 0 && players < max)
+				return;
+
+		} else if (players < max && now < end) {
+			final long left = (end - now + 999L) / 1000L;
+
+			if (left == 10 || left == 5 || left <= 3)
+				this.tellLobby(entries, "comp.countdown", "seconds", left, "players", players, "max", max);
+
+			return;
+		}
+
+		// full lobby or countdown over: start on a free copy of a fitting arena, otherwise wait for one
+		Arena arena = null;
+		String world = null;
+
+		if (!"*".equals(key)) {
+			arena = this.arenas.get(key);
+			world = arena != null && this.fitsCompetitive(arena, players, Bukkit.getPlayer(entries.get(0).leader)) ? this.freeInstanceWorld(arena, null) : null;
+
+		} else {
+			final List<Arena> free = new ArrayList<>();
+
+			for (final Arena candidate : this.compArenas(players))
+				if (candidate.competitiveMin(this.settings.compMinPlayers) <= players && this.freeInstanceWorld(candidate, null) != null)
+					free.add(candidate);
+
+			if (!free.isEmpty()) {
+				arena = free.get(ThreadLocalRandom.current().nextInt(free.size()));
+				world = this.freeInstanceWorld(arena, null);
+			}
+		}
+
+		if (arena == null || world == null) {
+			if (!this.compWaitingForTrack.contains(key)) {
+				this.compWaitingForTrack.add(key);
+				this.tellLobby(entries, "comp.waiting-track");
+			}
+
+			return;
+		}
+
+		this.compWaitingForTrack.remove(key);
+		this.compCountdowns.remove(key);
+
+		final List<List<Player>> teams = new ArrayList<>();
+
+		for (final int index : selected) {
+			final CompEntry entry = entries.get(index);
+			final List<Player> members = new ArrayList<>();
+
+			this.compQueue.remove(entry);
+
+			for (final UUID member : entry.members)
+				members.add(Bukkit.getPlayer(member));
+
+			teams.add(members);
+		}
+
+		this.startCompetitiveMatch(arena, world, teams);
+	}
+
+	private void tellLobby(final List<CompEntry> entries, final String key, final Object... placeholders) {
+		for (final CompEntry entry : entries)
+			for (final UUID member : entry.members) {
+				final Player player = Bukkit.getPlayer(member);
+
+				if (player != null)
+					Msg.send(player, key, placeholders);
+			}
+	}
+
+	/**
+	 * Seats a match: the first racers of every team, then the second ones ... (nobody gets the whole front row), every
+	 * racer is dressed in the team color, gets the team tag and is told their team (and the lineup bonus). The lights
+	 * start right away.
+	 */
+	private void startCompetitiveMatch(final Arena arena, final String world, final List<List<Player>> teams) {
+		final Arena instance = world.equals(arena.getWorldName()) ? arena : arena.inWorld(world);
+		final Heat heat = new Heat(instanceKey(arena, world), instance, true);
+		final long now = System.currentTimeMillis();
+
+		heat.privateHeat = true;
+		heat.competitive = true;
+
+		int biggest = 0;
+
+		for (int team = 0; team < teams.size(); team++) {
+			final List<Player> members = teams.get(team);
+			final List<UUID> uuids = new ArrayList<>();
+
+			heat.teamColors.add(this.settings.teamColors.get(team));
+			biggest = Math.max(biggest, members.size());
+
+			for (final Player member : members) {
+				heat.teamOf.put(member.getUniqueId(), team);
+				uuids.add(member.getUniqueId());
+			}
+
+			final int streak = this.lineups.countMatch(uuids, now, this.settings.lineupExpireMs);
+			final double bonus = Lineups.bonus(streak, this.settings.lineupPerMatch, this.settings.lineupMax);
+
+			for (final UUID uuid : uuids) {
+				heat.xpBoost.put(uuid, 1.0D + bonus);
+				heat.lineupStreak.put(uuid, streak);
+			}
+		}
+
+		// attaching in this order makes the lowest free grid position alternate between the teams
+		final List<Player> seating = new ArrayList<>();
+
+		for (int member = 0; member < biggest; member++)
+			for (final List<Player> team : teams)
+				if (member < team.size())
+					seating.add(team.get(member));
+
+		final JoinResult result = this.attachGroup(seating, heat, true, true);
+
+		if (heat.slots.isEmpty() && this.heats.get(heat.key) == heat)
+			this.releaseHeat(heat);
+
+		if (result != JoinResult.JOINED) {
+			for (final Player player : seating)
+				if (player.isOnline() && !this.sessions.containsKey(player.getUniqueId()))
+					Msg.send(player, "comp.match-failed");
+
+			return;
+		}
+
+		for (final RaceSession racer : heat.racers()) {
+			final Player player = Bukkit.getPlayer(racer.playerId);
+			final Integer team = heat.teamOf.get(racer.playerId);
+
+			if (player == null || team == null)
+				continue;
+
+			final TeamColor color = heat.teamColors.get(team);
+			final List<String> mates = new ArrayList<>();
+
+			for (final Player mate : teams.get(team))
+				if (!mate.equals(player))
+					mates.add(mate.getName());
+
+			this.dressTeam(player, color);
+
+			if (this.luckPerms != null)
+				this.luckPerms.setMeta(player.getUniqueId(), this.settings.teamMetaKey, this.teamTag(color));
+
+			Msg.send(player, "comp.assigned", "team", color.colored(), "color", color.chat(), "arena", arena.getName(), "teams", teams.size(),
+					"racers", seating.size(), "mates", mates.isEmpty() ? Msg.text("comp.solo") : String.join(", ", mates));
+
+			final int streak = heat.lineupStreak.getOrDefault(racer.playerId, 1);
+
+			if (streak > 1)
+				Msg.send(player, "comp.lineup-bonus", "matches", streak, "bonus", Math.round((heat.xpBoost.get(racer.playerId) - 1.0D) * 100.0D));
+
+			Msg.title(player, "team-assigned", "team", color.colored(), "teams", teams.size(), "racers", seating.size());
+		}
+	}
+
+	/** Full leather armor in the team color. It cannot be taken off (the inventory is locked while racing) and goes
+	 * away with the inventory snapshot when the race is over. */
+	private void dressTeam(final Player player, final TeamColor color) {
+		final PlayerInventory inventory = player.getInventory();
+
+		inventory.setHelmet(this.teamArmor(Material.LEATHER_HELMET, color));
+		inventory.setChestplate(this.teamArmor(Material.LEATHER_CHESTPLATE, color));
+		inventory.setLeggings(this.teamArmor(Material.LEATHER_LEGGINGS, color));
+		inventory.setBoots(this.teamArmor(Material.LEATHER_BOOTS, color));
+	}
+
+	private ItemStack teamArmor(final Material material, final TeamColor color) {
+		final ItemStack item = new ItemStack(material);
+		final LeatherArmorMeta meta = (LeatherArmorMeta) item.getItemMeta();
+
+		meta.setColor(color.armor());
+		meta.setUnbreakable(true);
+		meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_UNBREAKABLE, ItemFlag.HIDE_DYE, ItemFlag.HIDE_ENCHANTS);
+		meta.displayName(Msg.item(Msg.text("comp.armor-name", "team", color.colored())));
+		meta.getPersistentDataContainer().set(this.itemKey, PersistentDataType.STRING, "team-armor");
+		item.setItemMeta(meta);
+
+		return item;
+	}
+
+	/**
+	 * Leaving a running competitive match: the result already counts as a DNF (0 points for the team, last place in the
+	 * rating); on top of that competitive.leaver.rating-penalty points and a cooldown before the next match. Players
+	 * with boatrace.competitive.bypass (ops) are spared - for testing.
+	 */
+	private void punishLeaver(final UUID uuid, final String name, final Player player) {
+		if (player != null && this.hasCompetitiveBypass(player))
+			return;
+
+		if (this.settings.compLeaverCooldownMs > 0L)
+			this.leaverCooldowns.put(uuid, System.currentTimeMillis() + this.settings.compLeaverCooldownMs);
+
+		if (this.settings.rankingEnabled && this.settings.compLeaverPenalty > 0)
+			this.storage.addRatings(Map.of(uuid, -this.settings.compLeaverPenalty), Map.of(uuid, name));
+
+		if (player != null)
+			Msg.send(player, "comp.leaver-penalty", "points", this.settings.compLeaverPenalty,
+					"minutes", Math.max(1L, this.settings.compLeaverCooldownMs / 60_000L));
+	}
+
+	/**
+	 * Computes the match result once nobody is racing any more: average points per member (DNF = 0), then the rating:
+	 * ONE rating per player - the teams in standing order are the "players" of an ELO race (a team is as strong as the
+	 * average of its members, competitive.k-factor), every member gets their team's change. Then the CaptainHook stats
+	 * and XP.
+	 */
+	private void settleTeams(final Heat heat) {
+		// only once the race was really started and nobody is racing (or waiting for the lights) any more
+		if (!heat.competitive || heat.teamSettled || this.massLeave || heat.phase != Heat.Phase.RACING)
+			return;
+
+		for (final RaceSession racer : heat.slots.values())
+			if (racer.state == RaceSession.State.RUNNING || racer.state == RaceSession.State.COUNTDOWN)
+				return;
+
+		heat.teamSettled = true;
+
+		final List<UUID> finishOrder = new ArrayList<>();
+		final Map<UUID, String> names = new HashMap<>();
+
+		for (final Heat.Result result : heat.results) {
+			finishOrder.add(result.uuid());
+			names.put(result.uuid(), result.name());
+		}
+
+		for (final Heat.Result result : heat.dnf)
+			names.putIfAbsent(result.uuid(), result.name());
+
+		for (final UUID uuid : heat.teamOf.keySet())
+			names.putIfAbsent(uuid, this.storage.getRating(uuid, "?").name());
+
+		heat.teamStandings = TeamScoring.standings(finishOrder, heat.teamOf, heat.teamColors.size(), this.settings.teamPoints);
+
+		final int winner = heat.teamStandings.get(0).team();
+		final Set<UUID> counted = new java.util.HashSet<>();
+		final Set<UUID> winners = new java.util.HashSet<>();
+
+		// nobody crossed the line: there is no winner and nothing to compare
+		final boolean decided = !finishOrder.isEmpty();
+
+		for (final Map.Entry<UUID, Integer> member : heat.teamOf.entrySet())
+			if (!this.storage.isBlacklisted(member.getKey())) {
+				counted.add(member.getKey());
+
+				if (decided && member.getValue() == winner)
+					winners.add(member.getKey());
+			}
+
+		final boolean rated = decided && this.settings.rankingEnabled && heat.fieldSize >= this.settings.rankingMinRacers && heat.teamColors.size() >= 2;
+		final Map<UUID, Integer> before = new HashMap<>();
+
+		for (final UUID uuid : counted)
+			before.put(uuid, this.storage.getRating(uuid, names.get(uuid)).rating());
+
+		if (rated) {
+			final List<UUID> teamOrder = new ArrayList<>();
+			final Map<UUID, Integer> teamRatings = new HashMap<>();
+
+			for (final TeamScoring.Standing standing : heat.teamStandings) {
+				final UUID key = new UUID(0L, standing.team());
+				int sum = 0;
+				int count = 0;
+
+				for (final UUID uuid : counted)
+					if (heat.teamOf.get(uuid) == standing.team()) {
+						sum += before.get(uuid);
+						count++;
+					}
+
+				teamOrder.add(key);
+				teamRatings.put(key, count > 0 ? Math.round((float) sum / count) : this.settings.rankingStart);
+			}
+
+			final Map<UUID, Integer> teamDeltas = Elo.deltas(teamOrder, teamRatings, this.settings.compK);
+			final Map<UUID, Integer> deltas = new HashMap<>();
+
+			for (final UUID uuid : counted)
+				deltas.put(uuid, teamDeltas.get(new UUID(0L, heat.teamOf.get(uuid))));
+
+			this.storage.addRatings(deltas, names);
+		}
+
+		this.storage.recordCompetitiveResult(counted, names, winners);
+
+		// a team whose members ALL crossed the line
+		final Set<UUID> fullTeams = new java.util.HashSet<>();
+		final Set<UUID> finishedSet = new java.util.HashSet<>(finishOrder);
+
+		for (final TeamScoring.Standing standing : heat.teamStandings) {
+			boolean all = standing.members() > 0;
+
+			for (final Map.Entry<UUID, Integer> member : heat.teamOf.entrySet())
+				if (member.getValue() == standing.team() && !finishedSet.contains(member.getKey()))
+					all = false;
+
+			if (all)
+				for (final Map.Entry<UUID, Integer> member : heat.teamOf.entrySet())
+					if (member.getValue() == standing.team() && counted.contains(member.getKey()))
+						fullTeams.add(member.getKey());
+		}
+
+		final Map<UUID, Integer> after = new HashMap<>();
+
+		for (final UUID uuid : counted) {
+			final int rating = this.storage.getRating(uuid, names.get(uuid)).rating();
+			final Player player = Bukkit.getPlayer(uuid);
+
+			after.put(uuid, rating);
+
+			if (rated && player != null) {
+				final int change = rating - before.get(uuid);
+
+				Msg.send(player, "comp.rating-change", "rating", rating, "delta", change > 0 ? "&a+" + change : change < 0 ? "&c" + change : "&7+0",
+						"rank", this.storage.getRatingRank(uuid));
+			}
+		}
+
+		if (this.captainHook != null) {
+			final List<UUID> finished = new ArrayList<>();
+
+			for (final UUID uuid : finishOrder)
+				if (counted.contains(uuid))
+					finished.add(uuid);
+
+			this.captainHook.reportCompetitiveResult(finished, winners, fullTeams, rated ? after : Map.of(), after, heat.xpBoost);
+		}
+	}
+
+	/** Team standings with every member's place, to every remaining racer of the match. */
+	private void sendTeamLeaderboard(final Heat heat, final List<RaceSession> recipients) {
+		if (heat.teamStandings == null)
+			return;
+
+		final Map<UUID, Integer> places = new HashMap<>();
+		final Map<UUID, String> names = new HashMap<>();
+
+		for (int index = 0; index < heat.results.size(); index++) {
+			places.put(heat.results.get(index).uuid(), index + 1);
+			names.put(heat.results.get(index).uuid(), heat.results.get(index).name());
+		}
+
+		for (final Heat.Result result : heat.dnf)
+			names.putIfAbsent(result.uuid(), result.name());
+
+		final String lapsNote = heat.laps > 1 ? Msg.text("finish.laps-note", "laps", heat.laps) : "";
+
+		for (final RaceSession recipient : recipients) {
+			final Player player = Bukkit.getPlayer(recipient.playerId);
+
+			if (player == null)
+				continue;
+
+			final Integer own = heat.teamOf.get(recipient.playerId);
+
+			Msg.raw(player, "finish.team-header", "arena", heat.arena.getName(), "teams", heat.teamColors.size(), "laps_note", lapsNote);
+
+			int place = 1;
+
+			for (final TeamScoring.Standing standing : heat.teamStandings) {
+				final TeamColor color = heat.teamColors.get(standing.team());
+				final List<String> members = new ArrayList<>();
+
+				for (final Map.Entry<UUID, Integer> member : heat.teamOf.entrySet())
+					if (member.getValue() == standing.team()) {
+						final Integer position = places.get(member.getKey());
+
+						members.add(Msg.text("finish.team-member", "color", color.chat(), "player", names.getOrDefault(member.getKey(), "?"),
+								"position", position != null ? "#" + position : Msg.text("finish.team-dnf")));
+					}
+
+				Msg.raw(player, "finish.team-line", "place", place++, "team", color.colored(), "points", standing.pointsText(),
+						"members", String.join("&7, ", members), "you", own != null && own == standing.team() ? Msg.text("finish.party-you") : "");
+			}
+
+			Msg.raw(player, "finish.team-footer", "arena", heat.arena.getName(), "teams", heat.teamColors.size());
+		}
 	}
 
 	/**
@@ -1614,7 +2601,12 @@ public final class RaceManager {
 
 		heat.partyDone = true;
 
-		this.sendPartyLeaderboard(heat, racers);
+		if (heat.competitive) {
+			this.settleTeams(heat);
+			this.sendTeamLeaderboard(heat, racers);
+
+		} else
+			this.sendPartyLeaderboard(heat, racers);
 
 		for (final RaceSession racer : racers)
 			this.later(racer, this.settings.finishDelayTicks, () -> {
@@ -1860,6 +2852,7 @@ public final class RaceManager {
 
 	public void handleQuit(final Player player) {
 		this.dequeue(player.getUniqueId());
+		this.removeFromCompQueue(player.getUniqueId(), true);
 
 		final RaceSession s = this.sessions.get(player.getUniqueId());
 
@@ -1905,8 +2898,10 @@ public final class RaceManager {
 
 	private void tick() {
 		// safety net once a second - the normal trigger is an instance being released
-		if (!this.queues.isEmpty() && ++this.queueTicker % 20 == 0)
+		if ((!this.queues.isEmpty() || !this.compQueue.isEmpty() || !this.compCountdowns.isEmpty()) && ++this.queueTicker % 20 == 0) {
 			this.processQueues();
+			this.processCompetitive();
+		}
 
 		if (this.sessions.isEmpty())
 			return;

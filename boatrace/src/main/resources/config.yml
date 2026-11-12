@@ -171,6 +171,13 @@ fallback:
       - example_arena_copy_1
       - example_arena_copy_2
 
+# Tab list (player list) for a server that only runs BoatRace: true = players in the lobby only see the lobby, racers
+# only see the players of their own race (solo, event, party or competitive match - also on the grid and after the
+# finish); a spectator (/bre spectate) sees the session they watch. Players stay visible in the world, only the tab
+# list is filtered (works with the TAB plugin as long as its "layout" feature is off). boatrace.tablist.bypass = see all.
+tablist:
+  session-only: false
+
 # Hotbar buttons given to racers (the player's real inventory is saved and restored).
 hotbar:
   enabled: true
@@ -179,3 +186,109 @@ hotbar:
 
 placeholders:
   empty: "-"                # returned when there is no time / no player on the position
+
+# Ranking: ONE rating per player, ELO-like points (as in chess). Casual ranked races = event and party races with at least
+# min-racers racers at lights out. The finishing order counts as duels - everybody beat everybody behind them, players
+# who left the race are behind all finishers (who left first is last). Losing costs points, so arranged results
+# between friends do not pay off: they just pass the same points back and forth. Solo runs are never ranked.
+# Points are settled once nobody is racing any more. /bre reload and server stops never cost anybody points.
+# Competitive matches move the SAME rating, harder (competitive.k-factor) - see "competitive" below.
+# Placeholders for holograms / scoreboards: see the README (%boatrace_rating%, %boatrace_rating_top_player_1% ...).
+ranking:
+  enabled: true
+  start-rating: 1000
+  min-rating: 100           # nobody falls below this
+  k-factor: 16              # points at stake per CASUAL race (competitive: competitive.k-factor)
+  min-racers: 2             # also needed for wins and podiums
+  party-races: true         # false = races of a /party do not count (friends only racing each other)
+  leaderboard-min-games: 5  # ranked races needed to appear on the leaderboard
+  # season pass XP of a race (CaptainHook) is multiplied by the tier of the player's rating:
+  # the highest rating below that is at most the player's rating wins
+  xp-multipliers:
+    0: 0.5
+    900: 1.0
+    1100: 1.25
+    1300: 1.5
+    1500: 2.0
+
+# CaptainHook (the network's core plugin, optional): stats of FINISHED races for the website leaderboards,
+# achievements and season pass missions, plus season pass XP. Without CaptainHook (or with enabled: false) nothing
+# is reported. A race that is not finished (left, /bre reload, restart) reports nothing.
+#
+# Stats of the game below (one message per finished race; the keys and units are a contract with the website,
+# never change their meaning):
+#   races                 add  finished races              wins / podiums   add  1st / top 3 of a ranked race
+#   laps                  add  finished laps               distance         add  blocks sailed
+#   race_time_ms          add  time in races (ms, without penalties) - with distance: the overall average speed
+#   fastest_lap           min  best lap (ms)               fastest_<track>  min  best lap on the track (ms)
+#   fastest_race_<track>  min  best time of the whole race on the track (ms), races with the arena's own lap count
+#   top_avg_speed         max  best average speed of one race, blocks/s x 100 (12.34 b/s = 1234)
+#   best_streak           max  ranked races in a row finished without being last (the CURRENT run is reported)
+#   rating                set  ranking points (sent when a ranked race is settled)
+# <track> = arena name in lower case, characters other than a-z, 0-9 and _ become _, at most 19 characters
+# (/bre tracks lists them). Players on the blacklist (/bre admin) report nothing and get no XP.
+captainhook:
+  enabled: true
+  game: "formula-boat-racing"
+  # implausible results are not reported at all - a min / max stays in the database forever
+  min-lap-seconds: 5        # a lap faster than this
+  max-avg-speed: 75         # blocks/s (a boat on blue ice does about 72)
+  # season pass XP (0 = none), multiplied by ranking.xp-multipliers. Podium XP is for 2nd and 3rd place.
+  pass-xp:
+    finish: 5
+    win: 20
+    podium: 10
+    personal-best: 10       # a new personal best time (single-lap races)
+    blocks-per-xp: 250      # 1 XP per this many blocks sailed in a finished race (0 = none)
+    daily-limit: 300        # most XP per player and day from BoatRace (0 = no limit; resets at midnight / restart)
+
+# Competitive: team against team, from a lobby. A party = one team (up to max-team-size), a solo player = a team of 1.
+# Join: /bre ranked <arena|random>, the GUI (gui.yml "competitive-buttons"). Per arena (/bre compset or arenas.yml
+# "competitive: { enabled, min-players, max-players }"): min-players starts the countdown, max-players (never more than
+# the grid positions) starts at once. Teams that do not fit any more wait for the next match.
+# Grid: the first racer of every team, then the second ones ... Every racer wears the team color.
+# Result: every racer scores the points of their place (DNF = 0), a team scores the AVERAGE of its members (teams of
+# different sizes are comparable, the weakest member counts too). Tie: the team with the best single place.
+# Rating: the teams in standing order are one ELO race (a team = the average rating of its members), every member gets
+# the change of their team - into their own (shared) rating. Leaving a running match: DNF + leaver penalty + cooldown
+# (not for boatrace.competitive.bypass = ops, for testing). Races of the "not last" streak count by the racer's own place.
+competitive:
+  enabled: false
+  min-players: 4            # default for arenas without their own min-players
+  max-team-size: 4
+  countdown-seconds: 30     # once min-players is reached; a full lobby starts at once
+  k-factor: 48              # rating points at stake (casual: ranking.k-factor)
+  points: [10, 8, 6, 5, 4, 3, 2, 1]   # 1st, 2nd, 3rd ... place; places beyond the list score 0
+  leaver:
+    rating-penalty: 15      # on top of the DNF
+    cooldown-minutes: 5     # no competitive lobby for this long
+  # season pass XP (CaptainHook): the race XP (captainhook.pass-xp) x xp-multiplier, plus:
+  xp-multiplier: 2.0
+  pass-xp:
+    win: 30                 # every member of the winning team who finished
+    full-team: 10           # every member of a team whose members ALL finished
+  # The same lineup coming back: + per-match XP for every match in a row with exactly the same teammates (up to max).
+  # In memory only, one tiny entry per player; forgotten after expire-minutes without a match or a restart.
+  lineup-bonus:
+    per-match: 0.10
+    max: 0.30
+    expire-minutes: 30
+  # Team colors in assignment order (team 1 = first). Also the most teams of one match.
+  # armor: a Bukkit color name (RED, BLUE, LIME, AQUA, ORANGE, PURPLE ...) or "#RRGGBB".
+  colors:
+    RED:    { name: "Red",    armor: RED,    chat: "&c" }
+    BLUE:   { name: "Blue",   armor: BLUE,   chat: "&9" }
+    GREEN:  { name: "Green",  armor: GREEN,  chat: "&a" }
+    YELLOW: { name: "Yellow", armor: YELLOW, chat: "&e" }
+    ORANGE: { name: "Orange", armor: ORANGE, chat: "&6" }
+    PURPLE: { name: "Purple", armor: PURPLE, chat: "&5" }
+    AQUA:   { name: "Aqua",   armor: AQUA,   chat: "&b" }
+    WHITE:  { name: "White",  armor: WHITE,  chat: "&f" }
+  # The team tag as a TRANSIENT LuckPerms meta (never saved, gone on logout) while the player races a match.
+  # Show it between the rank prefix and the name in your chat / TAB format, e.g.
+  #   "%luckperms_prefix%%luckperms_meta_boatrace_team%%player_name%"
+  # Without LuckPerms use %boatrace_team_tag% (same text).
+  luckperms:
+    enabled: true
+    meta-key: "boatrace_team"
+    format: "{chat}[{name}] "   # {chat} {name} {id}

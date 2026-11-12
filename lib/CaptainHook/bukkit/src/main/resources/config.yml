@@ -1,0 +1,99 @@
+# !-----------------------------------------------------------------------------------------------!
+#                       ${project.name} ${project.version} - KingdomCraft network client
+# !-----------------------------------------------------------------------------------------------!
+#
+#    The Paper side of CaptainHook. It collects player stats, runs /link and /kc and offers
+#    CaptainHookAPI to other plugins. It has NO database: everything is stored by the CaptainHook
+#    plugin on the Velocity proxy, which this server reaches through the players' connections
+#    (plugin messaging channel captainhook:main). Players must join through the proxy.
+#
+#    Only account linking (/link <kod>) talks to the website directly. Those requests are signed
+#    with HMAC-SHA256 using api.secret. The website rejects requests whose timestamp differs by
+#    more than 60 seconds, so keep this machine's clock NTP-synced.
+#
+# !-----------------------------------------------------------------------------------------------!
+
+# -------------------------------------------------------------------------------------------------
+# Web API connection.
+# -------------------------------------------------------------------------------------------------
+api:
+
+  # Base URL of the integration API, without a trailing slash.
+  base-url: "https://kingdomcraft.pl/api/integrations/minecraft"
+
+  # Unique ID of this server, sent in the X-KC-Server header and stored as server_id with the stats.
+  # Use the name this server has in velocity.toml: the proxy assumes they are equal until this
+  # server has told it otherwise.
+  server-id: "hub"
+
+  # Shared secret of this server. Never share it or post it anywhere.
+  secret: "0vstLqUyhHxbR48Te3RC+Y0ljQ7q90PcvbLHhqwYKS8="
+
+  # Connect and read timeout of each request.
+  timeout-seconds: 10
+
+# -------------------------------------------------------------------------------------------------
+# Player stats, sent to the proxy which writes them to the database (tables ch_player_stats and
+# ch_player_stats_total) where the website reads them.
+#
+#   realtime-interval-seconds: how often players whose stats changed (kills, deaths, placed blocks,
+#                              joining/leaving) are sent. Only changed players are sent, in one batch.
+#   sync-interval-minutes:     how often ALL online players are sent, which refreshes playtime and
+#                              the online heartbeat (updated_at) the website uses to detect crashes.
+# -------------------------------------------------------------------------------------------------
+stats:
+  realtime-interval-seconds: 5
+  sync-interval-minutes: 5
+
+# -------------------------------------------------------------------------------------------------
+# Season pass missions. Which missions exist (and their XP) is configured on the proxy (missions.yml);
+# this server only reports what players do (blocks broken, mobs killed, minutes played, ...).
+#
+#   claim-url:               where players are sent to claim their rewards (shown on level-up)
+#   flush-interval-seconds:  how often counted progress is sent to the proxy
+#   afk-after-seconds:       idle time after which minutes of play stop counting. Not used when EssentialsX
+#                            is installed: its own AFK status (AfkStatusChangeEvent) decides then.
+# -------------------------------------------------------------------------------------------------
+missions:
+  claim-url: "https://kingdomcraft.pl/dashboard/seasonpass"
+  flush-interval-seconds: 30
+  afk-after-seconds: 300
+
+# -------------------------------------------------------------------------------------------------
+# KingdomCoins - the network-wide premium currency. Balances live in the database of the proxy,
+# which also decides how often they are refreshed (its config.yml).
+# -------------------------------------------------------------------------------------------------
+kingdomcoins:
+
+  # The first alias is the main command label.
+  command-aliases: [kingdomcoins, kc, monety]
+
+# -------------------------------------------------------------------------------------------------
+# Aliases of the admin command (/captainhook reload|status). The first one is the main label.
+# -------------------------------------------------------------------------------------------------
+Command_Aliases: [captainhook, ch]
+
+# -------------------------------------------------------------------------------------------------
+# Language of player messages, loaded from localization/messages_<Locale>.yml (pl, en).
+# -------------------------------------------------------------------------------------------------
+Locale: pl
+
+# -------------------------------------------------------------------------------------------------
+# The prefix used in front of chat and console messages.
+# -------------------------------------------------------------------------------------------------
+Prefix: "&8[&6KingdomCraft&8]&7"
+
+# -------------------------------------------------------------------------------------------------
+# Log a console message if an operation takes over the time below (milliseconds). -1 to disable.
+# -------------------------------------------------------------------------------------------------
+Log_Lag_Over_Milis: 100
+
+# -------------------------------------------------------------------------------------------------
+# Debugger sections to print messages for.
+# -------------------------------------------------------------------------------------------------
+Debug: []
+
+# -------------------------------------------------------------------------------------------------
+# Do not change this value, otherwise it will corrupt your plugin installation!
+# -------------------------------------------------------------------------------------------------
+Version: 1

@@ -48,7 +48,7 @@ import pl.kingdomcraft.boatrace.util.Msg;
 public final class GuiManager implements Listener {
 
 	private enum Type {
-		MAP, RANDOM, CLOSE, NONE
+		MAP, RANDOM, CLOSE, TEAM, NONE
 	}
 
 	private record Action(Type type, String arena) {
@@ -97,6 +97,12 @@ public final class GuiManager implements Listener {
 	private Icon close;
 	private Icon filler;
 	private final List<Icon> decorations = new ArrayList<>();
+
+	/** A button of gui.yml "competitive-buttons": join the competitive lobby of one arena or of any (arena null). */
+	private record CompButton(Icon icon, String arena) {
+	}
+
+	private final List<CompButton> compButtons = new ArrayList<>();
 
 	public GuiManager(final JavaPlugin plugin, final ArenaManager arenas, final RaceManager races) {
 		this.plugin = plugin;
@@ -176,6 +182,24 @@ public final class GuiManager implements Listener {
 				if (icon != null)
 					this.decorations.add(icon);
 			}
+
+		this.compButtons.clear();
+
+		final ConfigurationSection buttons = c.getConfigurationSection("competitive-buttons");
+
+		if (buttons != null)
+			for (final String key : buttons.getKeys(false)) {
+				final ConfigurationSection section = buttons.getConfigurationSection(key);
+
+				if (section == null || !section.getBoolean("enabled", true))
+					continue;
+
+				final Icon icon = this.icon(section, "&6&lCompetitive");
+				final String arena = section.getString("arena", "random");
+
+				if (icon != null)
+					this.compButtons.add(new CompButton(icon, "random".equalsIgnoreCase(arena) ? null : arena));
+			}
 	}
 
 	private static Set<String> clicks(final YamlConfiguration c, final String path, final String... defaults) {
@@ -244,6 +268,17 @@ public final class GuiManager implements Listener {
 		if (this.close != null)
 			reserved.addAll(this.close.slots());
 
+		final pl.kingdomcraft.boatrace.Settings settings = pl.kingdomcraft.boatrace.BoatRacePlugin.getInstance().getSettings();
+		final List<CompButton> visibleComp = new ArrayList<>();
+
+		// only with competitive.enabled, and an arena button only for an arena that exists
+		if (settings.compEnabled)
+			for (final CompButton button : this.compButtons)
+				if (button.arena() == null || this.arenas.get(button.arena()) != null) {
+					visibleComp.add(button);
+					reserved.addAll(button.icon().slots());
+				}
+
 		// 1) decoration (does nothing), 2) functional buttons on top of it
 		for (final Icon icon : this.decorations)
 			this.place(inventory, holder, icon.slots(), this.build(icon, new Object[0]), new Action(Type.NONE, null));
@@ -253,6 +288,20 @@ public final class GuiManager implements Listener {
 
 		if (this.random != null)
 			this.place(inventory, holder, this.random.slots(), this.build(this.random, this.randomPlaceholders(player)), new Action(Type.RANDOM, null));
+
+		for (final CompButton button : visibleComp) {
+			final RaceManager.CompLobbyInfo lobby = this.races.competitiveLobby(button.arena());
+
+			this.place(inventory, holder, button.icon().slots(), this.build(button.icon(), new Object[] {
+					"arena", lobby.arena(),
+					"players", lobby.players(),
+					"teams", lobby.teams(),
+					"min", lobby.min(),
+					"max", lobby.max(),
+					"countdown", lobby.countdown() >= 0 ? Msg.text("gui.comp-countdown", "seconds", lobby.countdown()) : "",
+					"queued", this.races.isInCompetitiveQueue(player.getUniqueId()) ? Msg.text("gui.comp-queued") : ""
+			}), new Action(Type.TEAM, button.arena() != null ? button.arena() : ""));
+		}
 
 		for (final Map.Entry<String, Icon> entry : this.mapIcons.entrySet()) {
 			final Arena arena = this.arenas.get(entry.getKey());
@@ -395,6 +444,7 @@ public final class GuiManager implements Listener {
 			case CLOSE -> Bukkit.getScheduler().runTask(this.plugin, (Runnable) player::closeInventory);
 			case RANDOM -> this.clickRandom(player);
 			case MAP -> this.clickMap(player, action.arena(), event.getClick().name(), holder);
+			case TEAM -> this.clickCompetitive(player, action.arena());
 			default -> {
 			}
 		}
@@ -428,6 +478,31 @@ public final class GuiManager implements Listener {
 
 		else if (this.clickDecrease.contains(click))
 			this.changeLaps(player, arena, -1, holder);
+	}
+
+	/** @param arenaName arena of the button, empty = any */
+	private void clickCompetitive(final Player player, final String arenaName) {
+		final Arena arena = arenaName.isEmpty() ? null : this.arenas.get(arenaName);
+
+		if (!arenaName.isEmpty() && arena == null)
+			return;
+
+		if (arena != null && !player.hasPermission(permission(arena))) {
+			Msg.send(player, "gui.no-permission", "arena", arena.getName(), "permission", permission(arena));
+			return;
+		}
+
+		Bukkit.getScheduler().runTask(this.plugin, () -> {
+			player.closeInventory();
+
+			// a second click leaves the lobby again
+			if (this.races.isInCompetitiveQueue(player.getUniqueId())) {
+				this.races.leaveCompetitive(player);
+				Msg.send(player, "comp.queue-left");
+
+			} else
+				this.races.joinCompetitive(player, arena);
+		});
 	}
 
 	private void clickRandom(final Player player) {

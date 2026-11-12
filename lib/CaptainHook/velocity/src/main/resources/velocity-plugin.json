@@ -1,0 +1,9 @@
+{
+  "id": "captainhook",
+  "name": "${project.name}",
+  "version": "${project.version}",
+  "description": "KingdomCraft network core: stats, KingdomCoins, minigames, achievements and the season pass.",
+  "authors": ["${author}"],
+  "dependencies": [],
+  "main": "${main.class}"
+}

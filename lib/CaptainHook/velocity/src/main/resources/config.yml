@@ -1,0 +1,63 @@
+# !-----------------------------------------------------------------------------------------------!
+#                          CaptainHook (Velocity) - the master of the network
+# !-----------------------------------------------------------------------------------------------!
+#
+#    The proxy owns the only database connection of the network. The Paper servers run the CaptainHook
+#    Bukkit plugin and reach the database through the proxy (plugin messaging channel captainhook:main).
+#
+#    Other files in this folder: achievements.yml and seasonpass.yml. They are re-read by
+#    "/captainhookproxy reload", this file needs a proxy restart for the database section.
+#
+# !-----------------------------------------------------------------------------------------------!
+
+# -------------------------------------------------------------------------------------------------
+# Database for stats, KingdomCoins, minigames, achievements and the season pass.
+# Changes require a proxy restart.
+#
+# If MySQL is disabled, unreachable or the credentials are wrong, the proxy falls back to a local
+# SQLite file (database.db), which the website cannot read. Once MySQL works again, use
+# "/captainhookproxy merge" to move what was collected in SQLite to MySQL.
+# -------------------------------------------------------------------------------------------------
+database:
+  mysql:
+    enabled: true
+    host: "db.devkdc.pl"
+    port: 3306
+    database: "s3_captainhook"
+    username: "captainhook_proxy"
+    password: "YtYzrwd1*2hztUT4a8DY%tkn"
+    # JDBC connection properties. TLS is mandatory: sslMode=VERIFY_IDENTITY checks the certificate
+    # against the database CA bundled in the jar (db-ca.pem) and the host name above against it.
+    # connectTimeout keeps server startup short when MySQL is down, rewriteBatchedStatements sends
+    # a whole stats batch in one round trip.
+    properties: "sslMode=VERIFY_IDENTITY&characterEncoding=utf8&connectTimeout=5000&socketTimeout=15000&rewriteBatchedStatements=true"
+
+# -------------------------------------------------------------------------------------------------
+# KingdomCoins - the network-wide premium currency.
+# -------------------------------------------------------------------------------------------------
+kingdomcoins:
+
+  # How often balances of online players and the top list are reloaded from the database, picking up
+  # changes made directly in the database (e.g. by the web shop). Needs a proxy restart.
+  refresh-interval-seconds: 30
+
+# -------------------------------------------------------------------------------------------------
+# Minigames (stats and cross-server joins of any minigame plugin using CaptainHookAPI).
+# -------------------------------------------------------------------------------------------------
+minigames:
+
+  # How long a pending join waits for the player to arrive on the minigame server (5 to 600).
+  # A minigame can ask for a different time per join.
+  pending-join-ttl-seconds: 60
+
+# -------------------------------------------------------------------------------------------------
+# Command rewards (achievements, season pass tiers, claims on the website) wait in ch_reward_queue
+# until the player is on a Paper server, which runs them and confirms. Needs a proxy restart.
+# -------------------------------------------------------------------------------------------------
+rewards:
+
+  # How often the queue is checked for players who are online (1 to 300).
+  dispatch-interval-seconds: 5
+
+  # A reward the server did not confirm is sent again after this long (10 to 3600).
+  retry-after-seconds: 60

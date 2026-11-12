@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.mineacademy.fo.model.SimpleExpansion;
 
 import pl.kingdomcraft.boatrace.BoatRacePlugin;
+import pl.kingdomcraft.boatrace.storage.PlayerRating;
 import pl.kingdomcraft.boatrace.storage.RaceRecord;
 import pl.kingdomcraft.boatrace.storage.RecordStorage;
 import pl.kingdomcraft.boatrace.util.TimeFmt;
@@ -21,6 +22,20 @@ import pl.kingdomcraft.boatrace.util.TimeFmt;
  *   %boatrace_top_server_<arena>_<position>% server (Server.Name) the time was driven on
  *   %boatrace_playing%                       players currently racing (all arenas)
  *   %boatrace_playing_<arena>%               players currently racing on that arena
+ *
+ * Ranking (holograms, scoreboards; the leaderboard needs ranking.leaderboard-min-games ranked races):
+ *   %boatrace_rating%                        ranking points of the player asking
+ *   %boatrace_rating_rank%                   their position on the ranking leaderboard (empty text if not on it)
+ *   %boatrace_rating_games% / _wins%         their ranked races / wins
+ *   %boatrace_rating_streak% / _best_streak% their current / longest run of ranked races without being last
+ *   %boatrace_rating_multiplier%             their season pass XP multiplier, e.g. 1.25
+ *   %boatrace_rating_top_player_<position>%  name on that position of the ranking leaderboard
+ *   %boatrace_rating_top_value_<position>%   points on that position
+ *
+ * Competitive:
+ *   %boatrace_team%                          colored team name while the player races a competitive match ("" otherwise)
+ *   %boatrace_team_tag%                      the team tag (competitive.luckperms.format), same text as the LuckPerms meta
+ *   %boatrace_comp_games% / %boatrace_comp_wins%   competitive matches played / won by the player's team
  *
  * Leaderboards / best times are the personal bests of the standard single-lap race; multi-lap totals are only stored
  * in the event results table.
@@ -54,6 +69,12 @@ public final class BoatRaceExpansion extends SimpleExpansion {
 			return String.valueOf(lower.equals("playing") ? plugin.getRaces().playingCount()
 					: plugin.getRaces().playingCount(identifier.substring("playing_".length())));
 		}
+
+		if (lower.startsWith("rating"))
+			return this.rating(plugin, storage, sender, lower, empty);
+
+		if (lower.startsWith("team") || lower.startsWith("comp_"))
+			return this.team(plugin, storage, sender, lower, empty);
 
 		if (lower.startsWith("besttime_")) {
 			final String arena = identifier.substring("besttime_".length());
@@ -101,5 +122,88 @@ public final class BoatRaceExpansion extends SimpleExpansion {
 		}
 
 		return NO_REPLACE;
+	}
+
+	private String team(final BoatRacePlugin plugin, final RecordStorage storage, final CommandSender sender, final String lower, final String empty) {
+		if (!(sender instanceof Player player))
+			return lower.startsWith("team") ? "" : empty;
+
+		switch (lower) {
+			case "team": {
+				final pl.kingdomcraft.boatrace.team.TeamColor color = plugin.getRaces() != null ? plugin.getRaces().teamColorOf(player.getUniqueId()) : null;
+
+				return color == null ? "" : color.colored();
+			}
+
+			case "team_tag":
+				return plugin.getRaces() != null ? plugin.getRaces().teamTagOf(player.getUniqueId()) : "";
+
+			case "comp_games":
+				return String.valueOf(storage.getRating(player.getUniqueId(), player.getName()).compGames());
+
+			case "comp_wins":
+				return String.valueOf(storage.getRating(player.getUniqueId(), player.getName()).compWins());
+
+			default:
+				return NO_REPLACE;
+		}
+	}
+
+	private String rating(final BoatRacePlugin plugin, final RecordStorage storage, final CommandSender sender, final String lower, final String empty) {
+		final boolean topPlayer = lower.startsWith("rating_top_player_");
+
+		if (topPlayer || lower.startsWith("rating_top_value_")) {
+			final int position;
+
+			try {
+				position = Integer.parseInt(lower.substring(topPlayer ? "rating_top_player_".length() : "rating_top_value_".length()));
+
+			} catch (final NumberFormatException ex) {
+				return NO_REPLACE;
+			}
+
+			final List<PlayerRating> top = storage.getRatingTop();
+
+			if (position < 1 || position > top.size())
+				return empty;
+
+			final PlayerRating rating = top.get(position - 1);
+
+			return topPlayer ? rating.name() : String.valueOf(rating.rating());
+		}
+
+		if (!(sender instanceof Player player))
+			return empty;
+
+		final PlayerRating rating = storage.getRating(player.getUniqueId(), player.getName());
+
+		switch (lower) {
+			case "rating":
+				return String.valueOf(rating.rating());
+
+			case "rating_rank": {
+				final int rank = storage.getRatingRank(player.getUniqueId());
+
+				return rank > 0 ? String.valueOf(rank) : empty;
+			}
+
+			case "rating_games":
+				return String.valueOf(rating.games());
+
+			case "rating_wins":
+				return String.valueOf(rating.wins());
+
+			case "rating_streak":
+				return String.valueOf(rating.streak());
+
+			case "rating_best_streak":
+				return String.valueOf(rating.bestStreak());
+
+			case "rating_multiplier":
+				return String.valueOf(plugin.getSettings().xpMultiplier(rating.rating()));
+
+			default:
+				return NO_REPLACE;
+		}
 	}
 }

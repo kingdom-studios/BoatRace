@@ -1,0 +1,325 @@
+# !-----------------------------------------------------------------------------------------------!
+#                                  Achievements of the whole network
+# !-----------------------------------------------------------------------------------------------!
+#
+#   Each key under "achievements" is the ID of an achievement: a-z, 0-9 and _ only. The ID is what is
+#   stored in the database (table ch_achievements), so NEVER rename it once players have progress.
+#
+#   name, description   shown to players in game and on the website
+#   category            free text for grouping (website, menus)
+#   icon                free text for whoever displays the achievement, e.g. a material name
+#   hidden              true = do not show the achievement before it is unlocked
+#   goal                progress needed to unlock (default 1)
+#
+#   source              where progress comes from:
+#     type: manual          only plugins add progress: CaptainHookAPI.addAchievementProgress(...)
+#     type: network-stat    follows a network-wide stat of the player. stat is one of:
+#                           playtime_seconds, blocks_placed, player_kills, mob_kills, deaths
+#     type: minigame-stat   follows a minigame stat reported through CaptainHookAPI: game + stat
+#                           at-most: N   for stats where LOWER is better (best times kept with "min"): the
+#                                        achievement unlocks once the player has the stat and it is at most N.
+#                                        Use goal 1 (the default) with it. Example: BoatRace "fastest_race_<track>" in ms.
+#
+#   rewards             granted once (see reward-mode below):
+#     kingdomcoins: 50      KingdomCoins
+#     pass-xp: 100          season pass XP (skipped while no season is active)
+#     commands: [...]       console commands on the player's server, {player} = name, {uuid} = UUID
+#     message: "..."        shown to the player when the commands run
+#     require-server: "x"   the commands only run on this server (its name in velocity.toml), e.g. a
+#                           game-mode item; the reward waits in the queue while the player is elsewhere
+#
+#   reward-mode         when the rewards are granted:
+#     claim                 the player claims them on the website (dashboard), after the unlock
+#     automatic             the moment the achievement unlocks
+#                         Set it at the top of the file for all achievements; an achievement can
+#                         override it with its own "reward-mode" key.
+#
+#   The achievements are copied into the database (ch_achievement_definitions) on every start and
+#   reload, which is where the website reads them from.
+#
+#   Lowering a goal unlocks the achievement for everyone already past it the next time their
+#   progress changes. Removing an achievement keeps its rows in the database.
+#
+#   Apply changes with /captainhookproxy reload.
+#
+# !-----------------------------------------------------------------------------------------------!
+
+reward-mode: claim
+
+achievements:
+
+  first_blood:
+    name: "Pierwsza krew"
+    description: "Zabij innego gracza."
+    category: "pvp"
+    icon: "IRON_SWORD"
+    goal: 1
+    source:
+      type: network-stat
+      stat: player_kills
+    rewards:
+      kingdomcoins: 10
+      pass-xp: 100
+
+  builder:
+    name: "Budowniczy"
+    description: "Postaw 10 000 bloków."
+    category: "survival"
+    icon: "BRICKS"
+    goal: 10000
+    source:
+      type: network-stat
+      stat: blocks_placed
+    rewards:
+      kingdomcoins: 25
+      pass-xp: 250
+
+  veteran:
+    name: "Weteran"
+    description: "Spędź na serwerze 100 godzin."
+    category: "general"
+    icon: "CLOCK"
+    goal: 360000
+    source:
+      type: network-stat
+      stat: playtime_seconds
+    rewards:
+      kingdomcoins: 100
+      pass-xp: 500
+
+  terror_survivor:
+    name: "Ocalały"
+    description: "Wygraj 10 gier w House of Terror."
+    category: "house_of_terror"
+    icon: "TOTEM_OF_UNDYING"
+    goal: 10
+    source:
+      type: minigame-stat
+      game: house-of-terror
+      stat: wins
+    rewards:
+      kingdomcoins: 50
+      pass-xp: 300
+
+  # --- House of Terror: the minigame plugin feeds these through CaptainHookAPI.addAchievementProgress, so they are
+  # --- "manual" (an achievement that follows a stat cannot take manual progress). Ids match its settings.yml.
+  hot_monster_kills:
+    name: "Pogromca potworów"
+    description: "Pokonaj 200 potworów w House of Terror."
+    category: "house_of_terror"
+    icon: "hot_monster_kills.png"
+    goal: 200
+    rewards:
+      kingdomcoins: 30
+      pass-xp: 60
+
+  hot_boss_slayer:
+    name: "Pogromca bossów"
+    description: "Pokonaj 5 bossów w House of Terror."
+    category: "house_of_terror"
+    goal: 5
+    rewards:
+      kingdomcoins: 40
+      pass-xp: 80
+
+  hot_puzzle_solver:
+    name: "Łamigłówka"
+    description: "Rozwiąż 25 zagadek w House of Terror."
+    category: "house_of_terror"
+    goal: 25
+    rewards:
+      kingdomcoins: 25
+      pass-xp: 50
+
+  hot_explorer:
+    name: "Odkrywca"
+    description: "Otwórz 50 nowych pokoi w House of Terror."
+    category: "house_of_terror"
+    goal: 50
+    rewards:
+      kingdomcoins: 25
+      pass-xp: 50
+
+  hot_medic:
+    name: "Medyk"
+    description: "Ożyw 10 współgraczy w House of Terror."
+    category: "house_of_terror"
+    goal: 10
+    rewards:
+      kingdomcoins: 30
+      pass-xp: 60
+
+  hot_survivor:
+    name: "Przetrwaniec"
+    description: "Przetrwaj 50 fal w House of Terror."
+    category: "house_of_terror"
+    goal: 50
+    rewards:
+      kingdomcoins: 30
+      pass-xp: 60
+
+  hot_veteran:
+    name: "Weteran grozy"
+    description: "Rozegraj 25 meczów w House of Terror."
+    category: "house_of_terror"
+    goal: 25
+    rewards:
+      kingdomcoins: 35
+      pass-xp: 70
+
+  hot_escapist:
+    name: "Mistrz ucieczki"
+    description: "Uciekaj z House of Terror 10 razy."
+    category: "house_of_terror"
+    icon: "hot_escapist.png"
+    goal: 10
+    rewards:
+      kingdomcoins: 50
+      pass-xp: 100
+
+  # --- Formula Boat Racing (BoatRace plugin, game "formula-boat-racing"): stats of FINISHED races, see its config.yml
+  # --- "captainhook". races / wins / podiums / laps / distance (blocks) are counters; fastest_lap, fastest_<track> and
+  # --- fastest_race_<track> are best times in ms (min); top_avg_speed = best average speed in blocks/s x 100 (max);
+  # --- best_streak = longest run of ranked races finished without being last (max). <track>: /bre tracks.
+  br_first_finish:
+    name: "Pierwszy rejs"
+    description: "Ukończ swój pierwszy wyścig łodzi."
+    category: "boatrace"
+    icon: "OAK_BOAT"
+    goal: 1
+    source:
+      type: minigame-stat
+      game: formula-boat-racing
+      stat: races
+    rewards:
+      kingdomcoins: 5
+      pass-xp: 30
+
+  br_sailor:
+    name: "Wilk morski"
+    description: "Ukończ 100 wyścigów łodzi."
+    category: "boatrace"
+    icon: "SPRUCE_BOAT"
+    goal: 100
+    source:
+      type: minigame-stat
+      game: formula-boat-racing
+      stat: races
+    rewards:
+      kingdomcoins: 40
+      pass-xp: 200
+
+  br_first_win:
+    name: "Pierwsze zwycięstwo"
+    description: "Wygraj wyścig łodzi z co najmniej jednym rywalem."
+    category: "boatrace"
+    icon: "GOLD_INGOT"
+    goal: 1
+    source:
+      type: minigame-stat
+      game: formula-boat-racing
+      stat: wins
+    rewards:
+      kingdomcoins: 15
+      pass-xp: 60
+
+  br_champion:
+    name: "Mistrz regat"
+    description: "Wygraj 25 wyścigów łodzi."
+    category: "boatrace"
+    icon: "GOLD_BLOCK"
+    goal: 25
+    source:
+      type: minigame-stat
+      game: formula-boat-racing
+      stat: wins
+    rewards:
+      kingdomcoins: 75
+      pass-xp: 300
+
+  br_podium:
+    name: "Na podium"
+    description: "Stań 10 razy na podium wyścigu łodzi."
+    category: "boatrace"
+    icon: "IRON_INGOT"
+    goal: 10
+    source:
+      type: minigame-stat
+      game: formula-boat-racing
+      stat: podiums
+    rewards:
+      kingdomcoins: 25
+      pass-xp: 120
+
+  br_distance_10k:
+    name: "Żeglarz"
+    description: "Przepłyń 10 000 bloków w wyścigach łodzi."
+    category: "boatrace"
+    icon: "COMPASS"
+    goal: 10000
+    source:
+      type: minigame-stat
+      game: formula-boat-racing
+      stat: distance
+    rewards:
+      kingdomcoins: 20
+      pass-xp: 100
+
+  br_distance_100k:
+    name: "Kapitan"
+    description: "Przepłyń 100 000 bloków w wyścigach łodzi."
+    category: "boatrace"
+    icon: "RECOVERY_COMPASS"
+    goal: 100000
+    source:
+      type: minigame-stat
+      game: formula-boat-racing
+      stat: distance
+    rewards:
+      kingdomcoins: 60
+      pass-xp: 300
+
+  # The progress bar fills with the best average speed (500 = 5.00 blocks/s) and unlocks at the goal.
+  br_speed_5:
+    name: "Szybka łódź"
+    description: "Ukończ wyścig ze średnią prędkością co najmniej 5 bloków/s."
+    category: "boatrace"
+    icon: "SUGAR"
+    goal: 500
+    source:
+      type: minigame-stat
+      game: formula-boat-racing
+      stat: top_avg_speed
+    rewards:
+      kingdomcoins: 20
+      pass-xp: 100
+
+  br_steady_5:
+    name: "Równa forma"
+    description: "Ukończ 5 rankingowych wyścigów z rzędu, ani razu nie będąc ostatnim."
+    category: "boatrace"
+    icon: "SHIELD"
+    goal: 5
+    source:
+      type: minigame-stat
+      game: formula-boat-racing
+      stat: best_streak
+    rewards:
+      kingdomcoins: 30
+      pass-xp: 150
+
+  # A time on one track, in ms with at-most (lower is better). <track> from /bre tracks. Example for track1,
+  # one lap under 0:30.000 / the whole race under 1:05.000:
+  #br_track1_fast:
+  #  name: "Szybki jak wiatr"
+  #  description: "Przepłyń okrążenie toru Track1 w czasie poniżej 0:30."
+  #  category: "boatrace"
+  #  icon: "CLOCK"
+  #  source:
+  #    type: minigame-stat
+  #    game: formula-boat-racing
+  #    stat: fastest_track1          # or fastest_race_track1 with at-most: 65000
+  #    at-most: 30000
+  #  rewards:
+  #    kingdomcoins: 30
+  #    pass-xp: 150

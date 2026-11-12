@@ -137,6 +137,9 @@ public final class ArenaManager {
 
 			arena.setLaps(section.getInt("laps", 1));
 			arena.setMaintenance(section.getBoolean("maintenance", false));
+			arena.setCompetitive(section.isBoolean("competitive.enabled") ? section.getBoolean("competitive.enabled") : null,
+					section.isInt("competitive.min-players") ? section.getInt("competitive.min-players") : null,
+					section.isInt("competitive.max-players") ? section.getInt("competitive.max-players") : null);
 			arena.setRewardMode(Arena.RewardMode.parse(section.getString("reward.mode", "NONE")));
 			arena.getRewardCommands().addAll(section.getStringList("reward.commands"));
 
@@ -209,6 +212,16 @@ public final class ArenaManager {
 
 			yaml.set(base + ".laps", arena.getLaps());
 			yaml.set(base + ".maintenance", arena.isMaintenance());
+
+			// optional: only written when set, so arenas.yml files stay as they are
+			if (arena.getCompetitiveEnabledRaw() != null)
+				yaml.set(base + ".competitive.enabled", arena.getCompetitiveEnabledRaw());
+
+			if (arena.getCompetitiveMinRaw() != null)
+				yaml.set(base + ".competitive.min-players", arena.getCompetitiveMinRaw());
+
+			if (arena.getCompetitiveMaxRaw() != null)
+				yaml.set(base + ".competitive.max-players", arena.getCompetitiveMaxRaw());
 			yaml.set(base + ".reward.mode", arena.getRewardMode().name());
 			yaml.set(base + ".reward.commands", new ArrayList<>(arena.getRewardCommands()));
 		}

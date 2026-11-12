@@ -10,6 +10,8 @@ import org.mineacademy.fo.command.SimpleCommandGroup;
 /**
  * /bre gui           opens the map menu for yourself
  * /bre gui <player>  opens it for another player (boatrace.admin - NPCs, hub signs, the console)
+ *
+ * Silent: the menu just opens, nothing is sent to the chat (neither to the player nor to whoever ran the command).
  */
 final class GuiSub extends RaceSubCommand {
 
@@ -37,7 +39,6 @@ final class GuiSub extends RaceSubCommand {
 		}
 
 		this.plugin().getGui().open(target);
-		this.info("gui.opened-other", "player", target.getName());
 	}
 
 	@Override

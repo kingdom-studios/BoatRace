@@ -104,3 +104,21 @@ items:
       - "&7Left / right click a map: change the laps"
       - "&7Shift + click a map: join it"
       - "&7A busy map puts you in its queue."
+
+# Competitive buttons (shown only with competitive.enabled: true in config.yml).
+# Click = join the competitive lobby (a party leader joins with the whole party as one team), click again = leave.
+# arena: "random" = the lobby for any competitive map, or an arena name (its own lobby, min / max: /bre compset).
+# Placeholders: {arena} {players} {teams} {min} {max} {countdown} {queued}. Pick slots that are free in your layout.
+competitive-buttons:
+  random:
+    enabled: false
+    arena: random
+    slot: 20
+    material: LEATHER_CHESTPLATE
+    name: "&6&lCompetitive"
+    lore:
+      - "&7Team against team. Your party = your team,"
+      - "&7alone you race as a team of 1."
+      - "&7Lobby: &f{players}&7 racers in &f{teams}&7 teams (&f{min}&7-&f{max}&7)"
+      - "{countdown}"
+      - "{queued}"

@@ -1,0 +1,171 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>pl.kingdomcraft</groupId>
+        <artifactId>captainhook-parent</artifactId>
+        <version>2.0.0</version>
+    </parent>
+
+    <!-- The Velocity side of Captain Hook: the only module with a database connection. -->
+    <artifactId>captainhook-velocity</artifactId>
+    <name>CaptainHook</name>
+    <packaging>jar</packaging>
+
+    <properties>
+        <main.class>pl.kingdomcraft.captainhook.velocity.CaptainHookVelocity</main.class>
+
+        <!-- Velocity 3.4 needs Java 17, so this is the lowest version the proxy can run on anyway. -->
+        <java.version>17</java.version>
+
+        <!-- The oldest API release we support. The plugin only uses API that is unchanged in Velocity 4. -->
+        <velocity.version>3.4.0</velocity.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>papermc</id>
+            <url>https://repo.papermc.io/repository/maven-public/</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.velocitypowered</groupId>
+            <artifactId>velocity-api</artifactId>
+            <version>${velocity.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Velocity ships no JDBC drivers, so both are shaded. They are not relocated: the SQLite driver
+             loads its native library by class name, and both are instantiated directly (no DriverManager). -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>9.7.0</version>
+            <exclusions>
+                <!-- Only needed for the X DevAPI. -->
+                <exclusion>
+                    <groupId>com.google.protobuf</groupId>
+                    <artifactId>protobuf-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.53.4.0</version>
+        </dependency>
+
+        <!-- Velocity has its own SnakeYAML (1.x or 2.x depending on the proxy version) on the parent class
+             loader, so ours is relocated. -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>2.7</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.11.4</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-nop</artifactId>
+            <version>2.0.17</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>${project.name}-Velocity-${project.version}</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <release>${java.version}</release>
+                    <!-- velocity-plugin.json is a filtered resource, so Velocity's annotation processor is not
+                         needed (and must not write a second copy). -->
+                    <proc>none</proc>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <createDependencyReducedPom>false</createDependencyReducedPom>
+                    <artifactSet>
+                        <includes>
+                            <include>com.mysql:mysql-connector-j</include>
+                            <include>org.xerial:sqlite-jdbc</include>
+                            <include>org.yaml:snakeyaml</include>
+                        </includes>
+                    </artifactSet>
+                    <relocations>
+                        <relocation>
+                            <pattern>org.yaml.snakeyaml</pattern>
+                            <shadedPattern>pl.kingdomcraft.captainhook.velocity.lib.snakeyaml</shadedPattern>
+                        </relocation>
+                    </relocations>
+                    <filters>
+                        <filter>
+                            <artifact>*:*</artifact>
+                            <excludes>
+                                <exclude>META-INF/*.SF</exclude>
+                                <exclude>META-INF/*.DSA</exclude>
+                                <exclude>META-INF/*.RSA</exclude>
+                                <exclude>META-INF/MANIFEST.MF</exclude>
+                                <!-- The jar is not multi-release, so these would be dead weight. -->
+                                <exclude>META-INF/versions/**</exclude>
+                                <exclude>META-INF/native-image/**</exclude>
+                                <exclude>module-info.class</exclude>
+                                <exclude>INFO_BIN</exclude>
+                                <exclude>INFO_SRC</exclude>
+                                <exclude>README</exclude>
+                            </excludes>
+                        </filter>
+                    </filters>
+                </configuration>
+            </plugin>
+        </plugins>
+
+        <resources>
+            <!-- Only the plugin descriptor is filtered: config.yml holds credentials that may contain "${". -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>velocity-plugin.json</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>velocity-plugin.json</exclude>
+                </excludes>
+            </resource>
+        </resources>
+    </build>
+</project>

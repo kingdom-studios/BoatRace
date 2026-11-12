@@ -4,7 +4,7 @@ main: pl.kingdomcraft.boatrace.BoatRacePlugin
 api-version: '26.2'
 author: Alek_Sialek
 description: F1-style boat racing minigame (start lights, checkpoints, rankings, rewards).
-softdepend: [PlaceholderAPI]
+softdepend: [PlaceholderAPI, CaptainHook, LuckPerms]
 
 # Commands are registered dynamically by Foundation (SimpleCommandGroup "boatrace|bre"), no "commands:" block needed.
 permissions:
@@ -13,6 +13,12 @@ permissions:
     default: op
   boatrace.join.others:
     description: /bre join <random|arena> <player> - send another player to a race
+    default: op
+  boatrace.tablist.bypass:
+    description: Always see every player in the tab list (tablist.session-only)
+    default: false
+  boatrace.competitive.bypass:
+    description: No leaver penalty / cooldown in competitive matches (testing)
     default: op
   boatrace.map.*:
     description: Play every map (boatrace.map.<arena name in lower case> = a single map). Used by the map menu.

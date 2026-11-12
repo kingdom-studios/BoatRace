@@ -13,6 +13,8 @@ prefix: "&8[&bBoatRace&8] &7"
 actionbar:
   # {lap_text} in the lines below: shown only in multi-lap races, empty otherwise. {lap} {laps}
   lap: "&7Lap &f{lap}&7/&f{laps} &8| "
+  # competitive: the live score of your team, put in front of {lap_text}. {team} {points} (average so far)
+  team: "{team} &f{points} pts &8| "
   # Event lobby, waiting for /bre start. {time} {players} {slots} {position} {laps} {lap_text}
   lobby: "{lap_text}&eTime: &f{time} &8| &7Grid position &f#{position} &8| &7Waiting for the start &f({players}/{slots})"
   # Before lights out. {time}
@@ -101,6 +103,13 @@ title:
     stay: 30
     fade-out: 8
   # {time} {arena} {laps}
+  # competitive: shown when the racer is seated. {team} {teams} {racers}
+  team-assigned:
+    title: "{team}"
+    subtitle: "&7Competitive &8- &f{teams} &7teams"
+    fade-in: 5
+    stay: 50
+    fade-out: 10
   finish:
     title: "&a&lFINISH"
     subtitle: "&f{time}"
@@ -162,6 +171,16 @@ finish:
   # footer: {arena} {laps} {players}
   party-footer: "&8&m                                                  "
   party-you: " &a(you)"
+  # Competitive leaderboard - sent when the last racer has finished (best team first, average F1 points per member)
+  # header: {arena} {teams} {laps_note}
+  team-header: "&8&m          &r &b&lCompetitive &7{arena}{laps_note} &8&m          "
+  # line: {place} {team} {points} (average per member) {members} {you}
+  team-line: "  &e&l{place}. {team} &8- &f{points} pts &8| {members}{you}"
+  # one member in {members}: {color} {player} {position} (#1, #2 ... or the dnf text)
+  team-member: "{color}{player} &7{position}"
+  team-dnf: "DNF"
+  # footer: {arena} {teams}
+  team-footer: "&8&m                                                  "
   # {laps} - inserted as {laps_note} in multi-lap races
   laps-note: " &7({laps} laps)"
   # {penalty} - inserted as {penalty_note} when the run had a jump start penalty
@@ -460,8 +479,9 @@ gui:
   # {arena} {permission}
   no-permission: "&cYou do not have permission to play &f{arena}&c. &7({permission})"
   no-random: "&cThere is no map you can play right now."
-  # {player}
-  opened-other: "&aOpened the map menu for &f{player}&a."
+  # {queued} / {countdown} of the competitive buttons
+  comp-queued: "&aYou are in this lobby - click to leave"
+  comp-countdown: "&eStarts in &f{seconds}s"
 
 # ------------------------------------------------------------------------------------------------
 # /bre spectate
@@ -480,3 +500,68 @@ spectate:
   you-racing: "&cYou cannot spectate while you are racing."
   # {value}
   unknown: "&cNo racing player or arena named &f{value}&c."
+
+# ------------------------------------------------------------------------------------------------
+# CaptainHook (season pass)
+# ------------------------------------------------------------------------------------------------
+captainhook:
+  # {xp}
+  pass-xp: "&b+{xp} season pass XP"
+
+# ------------------------------------------------------------------------------------------------
+# Ranking
+# ------------------------------------------------------------------------------------------------
+ranking:
+  # after a ranked race. {rating} {delta} (e.g. +12 / -7) {rank} (0 = not on the leaderboard yet)
+  change: "&7Ranking: &f{rating} &8({delta}&8)"
+  # /bre tracks
+  tracks-header: "&7Track ids for the website (&fid &7-> arena):"
+  tracks-line: "&f{id} &7-> {arena}"
+  tracks-duplicate: "&c{id} is used by several arenas: {arenas} - rename one, their stats would be mixed."
+
+# ------------------------------------------------------------------------------------------------
+# Competitive (/bre ranked, /bre compset)
+# ------------------------------------------------------------------------------------------------
+comp:
+  disabled: "&cCompetitive matches are not enabled."
+  # {size} {max}
+  party-too-big: "&cYour party has &f{size} &cplayers - a competitive team has at most &f{max}&c."
+  # {player}
+  member-busy: "&f{player} &cis already racing."
+  # {player} {minutes}
+  cooldown: "&f{player} &cleft a competitive match and has to wait &f{minutes} min&c."
+  # {arena}
+  no-arena: "&cNo map can host a competitive match right now (&f{arena}&c)."
+  any-arena: "any map"
+  solo: "&7none - you race alone"
+  # {arena} {players} {min} {max}
+  queued: "&aYou are in the competitive lobby of &f{arena}&a. &7Racers: &f{players}&7 (start from &f{min}&7, max &f{max}&7)"
+  # {seconds} {players} {max}
+  countdown-started: "&aEnough racers! The match starts in &f{seconds}s &7({players}/{max} - more can still join)."
+  countdown: "&7Match starts in &f{seconds}s &7({players}/{max})"
+  # {players} {min}
+  countdown-cancelled: "&cNot enough racers any more (&f{players}/{min}&c) - waiting for more."
+  waiting-track: "&7The match is ready - waiting for a free track."
+  queue-left: "&7You left the competitive lobby."
+  queue-cancelled: "&cYour place in the competitive lobby was cancelled (party changed, a member left or started another race)."
+  not-queued: "&cYou are not in a competitive lobby."
+  match-failed: "&cThe match could not start - you are back out of the lobby."
+  # {team} (colored name) {color} {arena} {teams} {racers} {mates}
+  assigned: "&7Your team: {team}&7! &7Teammates: {color}{mates} &8({teams} teams, {racers} racers)"
+  # {matches} {bonus} - same lineup again
+  lineup-bonus: "&bSame lineup, match &f{matches}&b in a row: &f+{bonus}% XP"
+  # name of the leather armor pieces. {team}
+  armor-name: "{team}"
+  # {rating} {delta} {rank}
+  rating-change: "&7Ranking (competitive): &f{rating} &8({delta}&8)"
+  # {points} {minutes}
+  leaver-penalty: "&cYou left a competitive match: &f-{points} &cranking points, no competitive match for &f{minutes} min&c."
+  list-header: "&7Competitive lobbies:"
+  # {arena} {players} {teams} {min} {max} {countdown}
+  list-line: "&f{arena}&7: &f{players}&7 racers / &f{teams}&7 teams &8(min {min}, max {max}) &7start: &f{countdown}"
+  list-empty: "&7Nobody is waiting for a competitive match."
+  # /bre compset. {arena} {enabled} {min} {max} {spawns}
+  set-info: "&f{arena}&7: competitive {enabled}&7, min &f{min}&7, max &f{max} &8(grid positions: {spawns})"
+  # {value}
+  set-not-a-number: "&c{value} is not a number."
+  set-too-small: "&cA match needs at least 2 racers."

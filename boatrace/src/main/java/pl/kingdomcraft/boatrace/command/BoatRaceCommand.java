@@ -16,6 +16,9 @@ public final class BoatRaceCommand extends SimpleCommandGroup {
 		this.registerSubcommand(new LeaveSub(this));
 		this.registerSubcommand(new ResetSub(this));
 		this.registerSubcommand(new ListSub(this));
+		this.registerSubcommand(new TracksSub(this));
+		this.registerSubcommand(new RankedSub(this));
+		this.registerSubcommand(new CompSetSub(this));
 		this.registerSubcommand(new GuiSub(this));
 
 		// admin: selection

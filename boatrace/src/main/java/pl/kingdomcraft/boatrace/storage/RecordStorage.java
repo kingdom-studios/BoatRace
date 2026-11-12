@@ -62,6 +62,7 @@ public final class RecordStorage {
 	private static final int PB_LAPS = 1;
 	private static final String BLACKLIST = "boatrace_blacklist";
 	private static final String REWARDS = "boatrace_rewards";
+	private static final String RATINGS = "boatrace_ratings";
 
 	private final JavaPlugin plugin;
 	private final ExecutorService io = Executors.newSingleThreadExecutor(runnable -> new Thread(runnable, "BoatRace-IO"));
@@ -78,6 +79,13 @@ public final class RecordStorage {
 	private Set<UUID> blacklist = new HashSet<>();
 	/** "arenaKey|uuid" of players who already received the one-time reward of an arena. Guarded by "this". */
 	private Set<String> claimedRewards = new HashSet<>();
+	// player -> ranking. Guarded by "this".
+	private Map<UUID, PlayerRating> ratings = new HashMap<>();
+	/** ranking leaderboard, null = rebuild. Guarded by "this". */
+	private List<PlayerRating> ratingTop;
+	private int startRating = 1000;
+	private int minRating = 100;
+	private int leaderboardMinGames = 5;
 
 	public RecordStorage(final JavaPlugin plugin) {
 		this.plugin = plugin;
@@ -147,6 +155,15 @@ public final class RecordStorage {
 					+ "arena VARCHAR(64) NOT NULL, uuid CHAR(36) NOT NULL, server_name VARCHAR(64) NOT NULL DEFAULT '', claimed BIGINT NOT NULL, "
 					+ "PRIMARY KEY (arena, uuid)"
 					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+			st.execute("CREATE TABLE IF NOT EXISTS " + RATINGS + " ("
+					+ "uuid CHAR(36) NOT NULL PRIMARY KEY, name VARCHAR(32) NOT NULL, rating INT NOT NULL, games INT NOT NULL DEFAULT 0, "
+					+ "wins INT NOT NULL DEFAULT 0, streak INT NOT NULL DEFAULT 0, best_streak INT NOT NULL DEFAULT 0, updated BIGINT NOT NULL, "
+					+ "KEY idx_rating (rating)"
+					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+			// competitive counters (added later: existing rows keep everything)
+			st.execute("ALTER TABLE " + RATINGS + " ADD COLUMN IF NOT EXISTS comp_games INT NOT NULL DEFAULT 0");
+			st.execute("ALTER TABLE " + RATINGS + " ADD COLUMN IF NOT EXISTS comp_wins INT NOT NULL DEFAULT 0");
 
 			this.importLegacySqlite(connection);
 			this.loadCache(connection);
@@ -287,7 +304,24 @@ public final class RecordStorage {
 				newRewards.add(key(rs.getString("arena")) + "|" + rs.getString("uuid"));
 		}
 
+		final Map<UUID, PlayerRating> newRatings = new HashMap<>();
+
+		try (Statement st = connection.createStatement();
+				ResultSet rs = st.executeQuery("SELECT uuid, name, rating, games, wins, streak, best_streak, comp_games, comp_wins FROM " + RATINGS)) {
+			while (rs.next())
+				try {
+					final UUID uuid = UUID.fromString(rs.getString("uuid"));
+
+					newRatings.put(uuid, new PlayerRating(uuid, rs.getString("name"), rs.getInt("rating"), rs.getInt("games"), rs.getInt("wins"),
+							rs.getInt("streak"), rs.getInt("best_streak"), rs.getInt("comp_games"), rs.getInt("comp_wins")));
+
+				} catch (final IllegalArgumentException ignored) {
+				}
+		}
+
 		synchronized (this) {
+			this.ratings = newRatings;
+			this.ratingTop = null;
 			this.records = newRecords;
 			this.blacklist = newBlacklist;
 			this.claimedRewards = newRewards;
@@ -637,8 +671,176 @@ public final class RecordStorage {
 		}
 
 		this.rankingCache.clear();
+		this.ratingTop = null;
 
 		return nowBlacklisted;
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Ranking (ELO-like points of ranked races)
+	// ------------------------------------------------------------------------------------------
+
+	/** Values of config.yml "ranking", applied on load / reload. */
+	public synchronized void configureRanking(final int startRating, final int minRating, final int leaderboardMinGames) {
+		this.startRating = startRating;
+		this.minRating = minRating;
+		this.leaderboardMinGames = leaderboardMinGames;
+		this.ratingTop = null;
+	}
+
+	/** The player's ranking; a player who never raced a ranked race has the start rating. Never null. */
+	public synchronized PlayerRating getRating(final UUID uuid, final String name) {
+		final PlayerRating rating = this.ratings.get(uuid);
+
+		return rating != null ? rating : PlayerRating.fresh(uuid, name, this.startRating);
+	}
+
+	/** @return the cached ranking, or null if the player never raced a ranked race */
+	public synchronized PlayerRating findRating(final UUID uuid) {
+		return this.ratings.get(uuid);
+	}
+
+	/**
+	 * Adds points (negative = takes them) to several players at once. The database update is relative
+	 * (rating = rating + ?), so races settled on other servers at the same moment never overwrite each other.
+	 *
+	 * @param names player names by UUID (for the leaderboard)
+	 */
+	public synchronized void addRatings(final Map<UUID, Integer> deltas, final Map<UUID, String> names) {
+		final int start = this.startRating;
+		final int floor = this.minRating;
+		final long now = System.currentTimeMillis();
+
+		for (final Map.Entry<UUID, Integer> entry : deltas.entrySet()) {
+			final UUID uuid = entry.getKey();
+			final String name = names.getOrDefault(uuid, "?");
+			final PlayerRating old = this.getRating(uuid, name);
+
+			this.ratings.put(uuid, old.withRating(name, Math.max(floor, old.rating() + entry.getValue())));
+		}
+
+		this.ratingTop = null;
+
+		final Map<UUID, Integer> copy = new HashMap<>(deltas);
+		final Map<UUID, String> namesCopy = new HashMap<>(names);
+
+		this.async(connection -> {
+			try (PreparedStatement ps = connection.prepareStatement("INSERT INTO " + RATINGS + " (uuid, name, rating, updated) VALUES (?, ?, GREATEST(?, ?), ?) "
+					+ "ON DUPLICATE KEY UPDATE name = VALUES(name), rating = GREATEST(?, rating + ?), updated = VALUES(updated)")) {
+				for (final Map.Entry<UUID, Integer> entry : copy.entrySet()) {
+					ps.setString(1, entry.getKey().toString());
+					ps.setString(2, namesCopy.getOrDefault(entry.getKey(), "?"));
+					ps.setInt(3, floor);
+					ps.setInt(4, start + entry.getValue());
+					ps.setLong(5, now);
+					ps.setInt(6, floor);
+					ps.setInt(7, entry.getValue());
+					ps.addBatch();
+				}
+
+				ps.executeBatch();
+			}
+		});
+	}
+
+	/**
+	 * Counts a ranked race of the player: games, wins and the "not last" streak.
+	 *
+	 * @param notLast finished and not on the last place (false for a last place and for leaving the race)
+	 * @return the player's ranking after the race
+	 */
+	public synchronized PlayerRating recordRankedResult(final UUID uuid, final String name, final boolean notLast, final boolean win) {
+		final PlayerRating old = this.getRating(uuid, name);
+		final int streak = notLast ? old.streak() + 1 : 0;
+		final PlayerRating updated = old.withRankedResult(name, win, streak);
+
+		this.ratings.put(uuid, updated);
+		this.ratingTop = null;
+
+		final int start = this.startRating;
+		final long now = System.currentTimeMillis();
+
+		this.async(connection -> {
+			// MariaDB assigns left to right: best_streak is computed from the OLD streak, then streak is changed
+			try (PreparedStatement ps = connection.prepareStatement("INSERT INTO " + RATINGS + " (uuid, name, rating, games, wins, streak, best_streak, updated) "
+					+ "VALUES (?, ?, ?, 1, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), games = games + 1, wins = wins + VALUES(wins), "
+					+ "best_streak = GREATEST(best_streak, IF(?, streak + 1, 0)), streak = IF(?, streak + 1, 0), updated = VALUES(updated)")) {
+				ps.setString(1, uuid.toString());
+				ps.setString(2, name);
+				ps.setInt(3, start);
+				ps.setInt(4, win ? 1 : 0);
+				ps.setInt(5, notLast ? 1 : 0);
+				ps.setInt(6, notLast ? 1 : 0);
+				ps.setLong(7, now);
+				ps.setBoolean(8, notLast);
+				ps.setBoolean(9, notLast);
+				ps.executeUpdate();
+			}
+		});
+
+		return updated;
+	}
+
+	/**
+	 * Counts a competitive match (the rating itself changes through {@link #addRatings}).
+	 *
+	 * @param winners members of the winning team
+	 */
+	public synchronized void recordCompetitiveResult(final java.util.Collection<UUID> members, final Map<UUID, String> names, final Set<UUID> winners) {
+		final int start = this.startRating;
+		final long now = System.currentTimeMillis();
+
+		for (final UUID uuid : members) {
+			final String name = names.getOrDefault(uuid, "?");
+
+			this.ratings.put(uuid, this.getRating(uuid, name).withCompetitiveResult(name, winners.contains(uuid)));
+		}
+
+		final List<UUID> copy = new ArrayList<>(members);
+		final Map<UUID, String> namesCopy = new HashMap<>(names);
+		final Set<UUID> winnersCopy = new HashSet<>(winners);
+
+		this.async(connection -> {
+			try (PreparedStatement ps = connection.prepareStatement("INSERT INTO " + RATINGS + " (uuid, name, rating, comp_games, comp_wins, updated) "
+					+ "VALUES (?, ?, ?, 1, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), comp_games = comp_games + 1, "
+					+ "comp_wins = comp_wins + VALUES(comp_wins), updated = VALUES(updated)")) {
+				for (final UUID uuid : copy) {
+					ps.setString(1, uuid.toString());
+					ps.setString(2, namesCopy.getOrDefault(uuid, "?"));
+					ps.setInt(3, start);
+					ps.setInt(4, winnersCopy.contains(uuid) ? 1 : 0);
+					ps.setLong(5, now);
+					ps.addBatch();
+				}
+
+				ps.executeBatch();
+			}
+		});
+	}
+
+	/**
+	 * Ranking leaderboard, best first: players with at least ranking.leaderboard-min-games ranked races, without the
+	 * blacklisted ones.
+	 */
+	public synchronized List<PlayerRating> getRatingTop() {
+		if (this.ratingTop == null)
+			this.ratingTop = this.ratings.values().stream()
+					.filter(rating -> rating.games() >= this.leaderboardMinGames && !this.blacklist.contains(rating.uuid()))
+					.sorted(java.util.Comparator.comparingInt(PlayerRating::rating).reversed().thenComparing(PlayerRating::name, String.CASE_INSENSITIVE_ORDER))
+					.toList();
+
+		return this.ratingTop;
+	}
+
+	/** @return 1-based position on the ranking leaderboard, 0 if the player is not on it */
+	public synchronized int getRatingRank(final UUID uuid) {
+		final List<PlayerRating> top = this.getRatingTop();
+
+		for (int i = 0; i < top.size(); i++)
+			if (top.get(i).uuid().equals(uuid))
+				return i + 1;
+
+		return 0;
 	}
 
 	// ------------------------------------------------------------------------------------------

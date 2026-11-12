@@ -54,6 +54,79 @@ public final class Settings {
 	public SoundSpec soundLap = new SoundSpec("minecraft:block.note_block.chime", 1.0F, 1.2F);
 	public SoundSpec soundMissedCheckpoint = new SoundSpec("minecraft:entity.villager.no", 1.0F, 0.8F);
 
+	// --- CaptainHook (season pass, achievements, missions) ---
+	public boolean chEnabled = true;
+	/** game id the proxy (and the website) knows BoatRace by (a-z, 0-9, _ and -) */
+	public String chGame = "formula-boat-racing";
+	/** results below / above these are not reported at all (a stored min / max stays forever) */
+	public long chMinLapMs = 5000L;
+	public double chMaxAvgSpeed = 75.0D;
+	public long chXpFinish = 5L;
+	public long chXpWin = 20L;
+	public long chXpPodium = 10L;
+	public long chXpPersonalBest = 10L;
+	/** blocks sailed per 1 XP (0 = no distance XP) */
+	public int chBlocksPerXp = 250;
+	/** most season pass XP one player gets from BoatRace per day (0 = no limit) */
+	public long chDailyXpLimit = 300L;
+	// --- competitive (team against team, from a lobby) ---
+	public boolean compEnabled = false;
+	/** default of an arena: racers needed before the countdown starts (an arena can override it in arenas.yml) */
+	public int compMinPlayers = 4;
+	/** biggest team (a party); a solo player is a team of 1 */
+	public int compMaxTeamSize = 4;
+	/** countdown once the lobby has enough racers; a full lobby starts at once */
+	public int compCountdownSeconds = 30;
+	/** ELO points at stake in a competitive match (the casual k is ranking.k-factor) */
+	public double compK = 48.0D;
+	/** points by finishing position (index 0 = 1st place); a team scores the average of its members */
+	public int[] teamPoints = { 10, 8, 6, 5, 4, 3, 2, 1 };
+	/** leaving a running competitive match: rating points lost on top of the result, and no new match for a while */
+	public int compLeaverPenalty = 15;
+	public long compLeaverCooldownMs = 5L * 60_000L;
+	/** race XP (captainhook.pass-xp) of competitive matches is multiplied by this */
+	public double compXpMultiplier = 2.0D;
+	/** XP for every member of the winning team who finished */
+	public long compXpWin = 30L;
+	/** XP for every member of a team whose members ALL finished */
+	public long compXpFullTeam = 10L;
+	/** same lineup bonus: + per match in a row with exactly the same team, at most max, forgotten after a break */
+	public double lineupPerMatch = 0.10D;
+	public double lineupMax = 0.30D;
+	public long lineupExpireMs = 30L * 60_000L;
+	/** team colors in assignment order (team 1 = first color); also the most teams of one match */
+	public final List<pl.kingdomcraft.boatrace.team.TeamColor> teamColors = new ArrayList<>();
+	public boolean teamLuckPerms = true;
+	public String teamMetaKey = "boatrace_team";
+	/** value of the LuckPerms meta, {chat} {name} {id} */
+	public String teamMetaFormat = "{chat}[{name}] ";
+
+	// --- tab list ---
+	/** a player only sees the players of their own group in the tab list: their race session, or the lobby */
+	public boolean tabListSessionOnly = false;
+
+	// --- ranking (ELO-like points of races against other players) ---
+	public boolean rankingEnabled = true;
+	public int rankingStart = 1000;
+	public int rankingMin = 100;
+	/** casual k (events, party races); competitive matches use competitive.k-factor */
+	public double rankingK = 16.0D;
+	/** a race is ranked with at least this many racers at lights out (also needed for wins / podiums) */
+	public int rankingMinRacers = 2;
+	/** party races count for the ranking too */
+	public boolean rankingPartyRaces = true;
+	/** players need this many ranked races to show up on the ranking leaderboard */
+	public int rankingLeaderboardMinGames = 5;
+	/** rating -> multiplier of the season pass XP of a race, highest matching rating wins */
+	public final java.util.TreeMap<Integer, Double> rankingXpMultipliers = new java.util.TreeMap<>();
+
+	/** @return the XP multiplier for this rating (1.0 without tiers) */
+	public double xpMultiplier(final int rating) {
+		final Map.Entry<Integer, Double> tier = this.rankingXpMultipliers.floorEntry(rating);
+
+		return tier != null ? tier.getValue() : this.rankingXpMultipliers.isEmpty() ? 1.0D : this.rankingXpMultipliers.firstEntry().getValue();
+	}
+
 	public String hubCommand = "spawn";
 	public EntityType boatType = EntityType.OAK_BOAT;
 
@@ -205,6 +278,90 @@ public final class Settings {
 		this.hubSlot = Math.max(0, Math.min(8, c.getInt("hotbar.hub-slot", 8)));
 
 		this.placeholderEmpty = c.getString("placeholders.empty", "-");
+
+		this.chEnabled = c.getBoolean("captainhook.enabled", true);
+		this.chGame = c.getString("captainhook.game", "formula-boat-racing").trim().toLowerCase(Locale.ROOT);
+		this.chMinLapMs = Math.max(0L, Math.round(c.getDouble("captainhook.min-lap-seconds", 5.0D) * 1000.0D));
+		this.chMaxAvgSpeed = Math.max(1.0D, c.getDouble("captainhook.max-avg-speed", 75.0D));
+		this.chXpFinish = Math.max(0L, c.getLong("captainhook.pass-xp.finish", 5L));
+		this.chXpWin = Math.max(0L, c.getLong("captainhook.pass-xp.win", 20L));
+		this.chXpPodium = Math.max(0L, c.getLong("captainhook.pass-xp.podium", 10L));
+		this.chXpPersonalBest = Math.max(0L, c.getLong("captainhook.pass-xp.personal-best", 10L));
+		this.chBlocksPerXp = Math.max(0, c.getInt("captainhook.pass-xp.blocks-per-xp", 250));
+		this.chDailyXpLimit = Math.max(0L, c.getLong("captainhook.pass-xp.daily-limit", 300L));
+
+		this.loadCompetitive(c);
+
+		this.tabListSessionOnly = c.getBoolean("tablist.session-only", false);
+
+		this.rankingEnabled = c.getBoolean("ranking.enabled", true);
+		this.rankingStart = Math.max(1, c.getInt("ranking.start-rating", 1000));
+		this.rankingMin = Math.max(0, Math.min(this.rankingStart, c.getInt("ranking.min-rating", 100)));
+		this.rankingK = Math.max(1.0D, c.getDouble("ranking.k-factor", 16.0D));
+		this.rankingMinRacers = Math.max(2, c.getInt("ranking.min-racers", 2));
+		this.rankingPartyRaces = c.getBoolean("ranking.party-races", true);
+		this.rankingLeaderboardMinGames = Math.max(0, c.getInt("ranking.leaderboard-min-games", 5));
+		this.rankingXpMultipliers.clear();
+
+		final ConfigurationSection tiers = c.getConfigurationSection("ranking.xp-multipliers");
+
+		if (tiers != null)
+			for (final String rating : tiers.getKeys(false))
+				try {
+					this.rankingXpMultipliers.put(Integer.parseInt(rating.trim()), Math.max(0.0D, tiers.getDouble(rating)));
+
+				} catch (final NumberFormatException ex) {
+					Bukkit.getLogger().warning("[BoatRace] ranking.xp-multipliers: '" + rating + "' is not a number - skipped.");
+				}
+	}
+
+	private void loadCompetitive(final FileConfiguration c) {
+		this.compEnabled = c.getBoolean("competitive.enabled", false);
+		this.compMinPlayers = Math.max(2, c.getInt("competitive.min-players", 4));
+		this.compMaxTeamSize = Math.max(1, c.getInt("competitive.max-team-size", 4));
+		this.compCountdownSeconds = Math.max(0, c.getInt("competitive.countdown-seconds", 30));
+		this.compK = Math.max(1.0D, c.getDouble("competitive.k-factor", 48.0D));
+		this.compLeaverPenalty = Math.max(0, c.getInt("competitive.leaver.rating-penalty", 15));
+		this.compLeaverCooldownMs = Math.max(0L, Math.round(c.getDouble("competitive.leaver.cooldown-minutes", 5.0D) * 60_000L));
+		this.compXpMultiplier = Math.max(0.0D, c.getDouble("competitive.xp-multiplier", 2.0D));
+		this.compXpWin = Math.max(0L, c.getLong("competitive.pass-xp.win", 30L));
+		this.compXpFullTeam = Math.max(0L, c.getLong("competitive.pass-xp.full-team", 10L));
+		this.lineupPerMatch = Math.max(0.0D, c.getDouble("competitive.lineup-bonus.per-match", 0.10D));
+		this.lineupMax = Math.max(0.0D, c.getDouble("competitive.lineup-bonus.max", 0.30D));
+		this.lineupExpireMs = Math.max(60_000L, Math.round(c.getDouble("competitive.lineup-bonus.expire-minutes", 30.0D) * 60_000L));
+		this.teamLuckPerms = c.getBoolean("competitive.luckperms.enabled", true);
+		this.teamMetaKey = c.getString("competitive.luckperms.meta-key", "boatrace_team").trim();
+		this.teamMetaFormat = c.getString("competitive.luckperms.format", "{chat}[{name}] ");
+
+		final List<Integer> points = c.getIntegerList("competitive.points");
+
+		this.teamPoints = points.isEmpty() ? new int[] { 10, 8, 6, 5, 4, 3, 2, 1 } : points.stream().mapToInt(value -> Math.max(0, value)).toArray();
+
+		this.teamColors.clear();
+
+		final ConfigurationSection colors = c.getConfigurationSection("competitive.colors");
+
+		if (colors != null)
+			for (final String id : colors.getKeys(false)) {
+				final ConfigurationSection color = colors.getConfigurationSection(id);
+				final String rawArmor = color != null ? color.getString("armor", id) : id;
+				org.bukkit.Color armor = pl.kingdomcraft.boatrace.team.TeamColor.parseColor(rawArmor);
+
+				if (armor == null) {
+					Bukkit.getLogger().warning("[BoatRace] competitive.colors." + id + ".armor '" + rawArmor + "' is not a color (Bukkit name or #RRGGBB) - using GRAY.");
+					armor = org.bukkit.Color.GRAY;
+				}
+
+				this.teamColors.add(new pl.kingdomcraft.boatrace.team.TeamColor(id, color != null ? color.getString("name", id) : id, armor,
+						color != null ? color.getString("chat", "&f") : "&f"));
+			}
+
+		if (this.teamColors.size() < 2) {
+			Bukkit.getLogger().warning("[BoatRace] competitive.colors needs at least 2 colors - using RED and BLUE.");
+			this.teamColors.clear();
+			this.teamColors.add(new pl.kingdomcraft.boatrace.team.TeamColor("RED", "Red", org.bukkit.Color.RED, "&c"));
+			this.teamColors.add(new pl.kingdomcraft.boatrace.team.TeamColor("BLUE", "Blue", org.bukkit.Color.BLUE, "&9"));
+		}
 	}
 
 	/**
