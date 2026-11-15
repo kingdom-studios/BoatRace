@@ -57,6 +57,7 @@ public final class RecordStorage {
 	private static final String RECORDS = "boatrace_records";
 	private static final String RUNS = "boatrace_runs";
 	private static final String EVENT_RESULTS = "boatrace_event_results";
+	private static final String TRACKS = "boatrace_tracks";
 
 	/** Personal bests exist only for the standard single-lap race. */
 	private static final int PB_LAPS = 1;
@@ -147,6 +148,15 @@ public final class RecordStorage {
 					+ "KEY idx_event_arena_total (arena, laps, total_ms), KEY idx_event_uuid (uuid), KEY idx_event_server (server_name)"
 					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+			// Which map is which: the website shows display_name instead of the technical ids. One row per map per server
+			// (every server owns - and cleans up - its own rows).
+			st.execute("CREATE TABLE IF NOT EXISTS " + TRACKS + " ("
+					+ "server_name VARCHAR(64) NOT NULL, arena_key VARCHAR(64) NOT NULL, arena VARCHAR(64) NOT NULL, "
+					+ "track_id VARCHAR(32) NOT NULL, display_name VARCHAR(64) NOT NULL, laps INT NOT NULL DEFAULT 1, "
+					+ "ready TINYINT(1) NOT NULL DEFAULT 0, competitive TINYINT(1) NOT NULL DEFAULT 1, maintenance TINYINT(1) NOT NULL DEFAULT 0, "
+					+ "updated BIGINT NOT NULL, PRIMARY KEY (server_name, arena_key), KEY idx_tracks_track_id (track_id), KEY idx_tracks_arena_key (arena_key)"
+					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
 			st.execute("CREATE TABLE IF NOT EXISTS " + BLACKLIST + " ("
 					+ "uuid CHAR(36) NOT NULL PRIMARY KEY, name VARCHAR(32) NOT NULL, server_name VARCHAR(64) NOT NULL DEFAULT '', created BIGINT NOT NULL"
 					+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -230,6 +240,77 @@ public final class RecordStorage {
 		config.setIdleTimeout(maxLifetime == 0L ? 600_000L : Math.min(600_000L, Math.max(10_000L, maxLifetime - 1_000L)));
 
 		return config;
+	}
+
+	/**
+	 * A map as the website needs to know it.
+	 *
+	 * @param arena       the arena name as typed
+	 * @param arenaKey    the same in lower case = the "arena" column of boatrace_records / runs / event_results
+	 * @param trackId     the id in CaptainHook stat keys (fastest_race_&lt;id&gt;, fastest_&lt;id&gt;)
+	 * @param displayName how the map is called (never an id)
+	 * @param laps        laps of a standard race on it
+	 */
+	public record TrackInfo(String arena, String arenaKey, String trackId, String displayName, int laps, boolean ready, boolean competitive, boolean maintenance) {
+
+		public static TrackInfo of(final pl.kingdomcraft.boatrace.arena.Arena arena) {
+			return new TrackInfo(arena.getName(), arena.getName().toLowerCase(Locale.ROOT), pl.kingdomcraft.boatrace.captainhook.CaptainHookHook.trackId(arena.getName()),
+					arena.getDisplayName(), arena.getLaps(), arena.isReady(), arena.isCompetitive(), arena.isMaintenance());
+		}
+	}
+
+	/**
+	 * Makes the track table of this server match its arenas: every arena is added / updated, rows of arenas that no
+	 * longer exist on this server are removed. Written in the background; rows of other servers are never touched.
+	 */
+	public void syncTracks(final List<TrackInfo> tracks) {
+		final String server = this.serverName;
+		final long now = System.currentTimeMillis();
+		final List<TrackInfo> rows = List.copyOf(tracks);
+
+		this.async(connection -> {
+			try (PreparedStatement ps = connection.prepareStatement("INSERT INTO " + TRACKS
+					+ " (server_name, arena_key, arena, track_id, display_name, laps, ready, competitive, maintenance, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+					+ "ON DUPLICATE KEY UPDATE arena = VALUES(arena), track_id = VALUES(track_id), display_name = VALUES(display_name), laps = VALUES(laps), "
+					+ "ready = VALUES(ready), competitive = VALUES(competitive), maintenance = VALUES(maintenance), updated = VALUES(updated)")) {
+				for (final TrackInfo track : rows) {
+					ps.setString(1, server);
+					ps.setString(2, track.arenaKey());
+					ps.setString(3, track.arena());
+					ps.setString(4, track.trackId());
+					ps.setString(5, track.displayName());
+					ps.setInt(6, track.laps());
+					ps.setBoolean(7, track.ready());
+					ps.setBoolean(8, track.competitive());
+					ps.setBoolean(9, track.maintenance());
+					ps.setLong(10, now);
+					ps.addBatch();
+				}
+
+				if (!rows.isEmpty())
+					ps.executeBatch();
+			}
+
+			final StringBuilder sql = new StringBuilder("DELETE FROM " + TRACKS + " WHERE server_name = ?");
+
+			if (!rows.isEmpty()) {
+				sql.append(" AND arena_key NOT IN (");
+
+				for (int i = 0; i < rows.size(); i++)
+					sql.append(i == 0 ? "?" : ", ?");
+
+				sql.append(')');
+			}
+
+			try (PreparedStatement ps = connection.prepareStatement(sql.toString())) {
+				ps.setString(1, server);
+
+				for (int i = 0; i < rows.size(); i++)
+					ps.setString(i + 2, rows.get(i).arenaKey());
+
+				ps.executeUpdate();
+			}
+		});
 	}
 
 	/** Flushes queued writes and closes the pool. Call from onDisable. */

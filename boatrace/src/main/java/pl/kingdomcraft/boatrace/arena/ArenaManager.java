@@ -24,6 +24,7 @@ public final class ArenaManager {
 	private final JavaPlugin plugin;
 	private final File file;
 	private final Map<String, Arena> arenas = new LinkedHashMap<>();
+	private Runnable listener;
 
 	public ArenaManager(final JavaPlugin plugin) {
 		this.plugin = plugin;
@@ -74,7 +75,22 @@ public final class ArenaManager {
 		return ready;
 	}
 
+	/** Called after every load and save: the arenas changed (the track table of the website is kept in sync). */
+	public void setChangeListener(final Runnable listener) {
+		this.listener = listener;
+	}
+
+	private void changed() {
+		if (this.listener != null)
+			this.listener.run();
+	}
+
 	public void load() {
+		this.read();
+		this.changed();
+	}
+
+	private void read() {
 		this.arenas.clear();
 
 		if (!this.file.exists())
@@ -138,6 +154,7 @@ public final class ArenaManager {
 
 			arena.setLaps(section.getInt("laps", 1));
 			arena.setMaintenance(section.getBoolean("maintenance", false));
+			arena.setDisplayName(section.getString("display-name"));
 			arena.setCompetitive(section.isBoolean("competitive.enabled") ? section.getBoolean("competitive.enabled") : null,
 					section.isInt("competitive.min-players") ? section.getInt("competitive.min-players") : null,
 					section.isInt("competitive.max-players") ? section.getInt("competitive.max-players") : null);
@@ -219,6 +236,9 @@ public final class ArenaManager {
 			yaml.set(base + ".laps", arena.getLaps());
 			yaml.set(base + ".maintenance", arena.isMaintenance());
 
+			if (arena.getCustomDisplayName() != null)
+				yaml.set(base + ".display-name", arena.getCustomDisplayName());
+
 			// optional: only written when set, so arenas.yml files stay as they are
 			if (arena.getCompetitiveEnabledRaw() != null)
 				yaml.set(base + ".competitive.enabled", arena.getCompetitiveEnabledRaw());
@@ -239,5 +259,7 @@ public final class ArenaManager {
 		} catch (final IOException ex) {
 			this.plugin.getLogger().log(Level.SEVERE, "Could not save arenas.yml", ex);
 		}
+
+		this.changed();
 	}
 }

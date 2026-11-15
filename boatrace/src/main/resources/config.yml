@@ -268,6 +268,12 @@ competitive:
   min-players: 4            # default for arenas without their own min-players
   max-team-size: 4
   countdown-seconds: 30     # once min-players is reached; a full lobby starts at once
+  # What a waiting player sees (texts: messages.yml actionbar.comp-* / title.comp-*): how many racers were found, how many
+  # are still missing, the countdown, "all tracks busy" - so nobody is left without information.
+  lobby-display:
+    action-bar: true
+    title: true
+    title-always: true      # keep the title on screen while waiting (false = only when something changes)
   k-factor: 48              # rating points at stake (casual: ranking.k-factor)
   points: [10, 8, 6, 5, 4, 3, 2, 1]   # 1st, 2nd, 3rd ... place; places beyond the list score 0
   leaver:

@@ -42,6 +42,7 @@ public final class BoatRaceCommand extends SimpleCommandGroup {
 		this.registerSubcommand(new AddResetZoneSub(this));
 		this.registerSubcommand(new RemoveResetZoneSub(this));
 		this.registerSubcommand(new LapsSub(this));
+		this.registerSubcommand(new DisplayNameSub(this));
 		this.registerSubcommand(new MaintenanceSub(this));
 		this.registerSubcommand(new RewardSub(this));
 

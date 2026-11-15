@@ -59,6 +59,9 @@ public final class Arena {
 	/** closed for players by an admin (/bre maintenance): no joining, no random pick, shown disabled in the menu */
 	private boolean maintenance;
 
+	/** how the map is called for players and on the website; null = derived from the arena name */
+	private String displayName;
+
 	/** laps of a normal race on this arena (events may override it) */
 	private int laps = 1;
 	/** arenas.yml "competitive" (all optional, null = the config.yml default) */
@@ -152,6 +155,31 @@ public final class Arena {
 
 	public Set<Material> getTrackBlocks() {
 		return this.trackBlocks;
+	}
+
+	/** The longest display name (the website table column). */
+	public static final int DISPLAY_NAME_MAX = 48;
+
+	/** The name set with /bre displayname, or null. */
+	public String getCustomDisplayName() {
+		return this.displayName;
+	}
+
+	public void setDisplayName(final String displayName) {
+		this.displayName = displayName == null || displayName.isBlank() ? null : displayName.trim();
+	}
+
+	/**
+	 * The readable name of the map: the custom one, otherwise the arena name with '_' and '-' turned into spaces
+	 * ("Monaco_GP" -> "Monaco GP"). The arena name itself stays the technical id.
+	 */
+	public String getDisplayName() {
+		if (this.displayName != null)
+			return this.displayName;
+
+		final String readable = this.name.replace('_', ' ').replace('-', ' ').replaceAll("\\s+", " ").trim();
+
+		return readable.isEmpty() ? this.name : readable;
 	}
 
 	public boolean isMaintenance() {
@@ -279,6 +307,7 @@ public final class Arena {
 		copy.competitiveMin = this.competitiveMin;
 		copy.competitiveMax = this.competitiveMax;
 		copy.maintenance = this.maintenance;
+		copy.displayName = this.displayName;
 		copy.rewardMode = this.rewardMode;
 		copy.rewardCommands.addAll(this.rewardCommands);
 

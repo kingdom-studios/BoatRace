@@ -1,9 +1,12 @@
 package pl.kingdomcraft.boatrace;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 
 import org.mineacademy.fo.plugin.SimplePlugin;
 
+import pl.kingdomcraft.boatrace.arena.Arena;
 import pl.kingdomcraft.boatrace.arena.ArenaManager;
 import pl.kingdomcraft.boatrace.captainhook.CaptainHookHook;
 import pl.kingdomcraft.boatrace.command.BoatRaceCommand;
@@ -78,6 +81,10 @@ public final class BoatRacePlugin extends SimplePlugin {
 
 		this.applyRankingSettings();
 
+		// the track table of the website follows every change of the arenas (and is written once now)
+		this.arenas.setChangeListener(this::syncTracks);
+		this.syncTracks();
+
 		this.parties = new PartyManager(this.settings);
 		this.registerEvents(this.parties);
 
@@ -145,6 +152,19 @@ public final class BoatRacePlugin extends SimplePlugin {
 	}
 
 	/** /bre reload - config.yml + messages.yml + arenas.yml. Racers are sent to the hub first so nobody keeps a stale arena. */
+	/** Writes the maps (id, readable name, laps ...) to boatrace_tracks so the website can show names instead of ids. */
+	private void syncTracks() {
+		if (this.storage == null)
+			return;
+
+		final List<RecordStorage.TrackInfo> tracks = new ArrayList<>();
+
+		for (final Arena arena : this.arenas.all())
+			tracks.add(RecordStorage.TrackInfo.of(arena));
+
+		this.storage.syncTracks(tracks);
+	}
+
 	public void reloadAll() {
 		if (this.races != null)
 			this.races.leaveAllToHub();

@@ -33,10 +33,15 @@ final class TracksSub extends RaceSubCommand {
 		this.info("ranking.tracks-header");
 
 		for (final Map.Entry<String, List<String>> entry : byId.entrySet())
-			if (entry.getValue().size() > 1)
+			// fastest_<id> would be the same key as the global fastest_lap (id "lap") or as fastest_race_<x> (id "race_<x>")
+			if (entry.getKey().equals("lap") || entry.getKey().startsWith("race_"))
+				this.info("ranking.tracks-reserved", "id", entry.getKey(), "arena", entry.getValue().get(0));
+
+			else if (entry.getValue().size() > 1)
 				this.info("ranking.tracks-duplicate", "id", entry.getKey(), "arenas", String.join(", ", entry.getValue()));
 			else
-				this.info("ranking.tracks-line", "id", entry.getKey(), "arena", entry.getValue().get(0));
+				this.info("ranking.tracks-line", "id", entry.getKey(), "arena", entry.getValue().get(0),
+						"name", this.plugin().getArenas().get(entry.getValue().get(0)).getDisplayName());
 	}
 
 	@Override

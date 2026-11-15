@@ -28,6 +28,13 @@ actionbar:
   running-delta: "{lap_text}&eTime: &f{time} {delta_text}"
   # A party member who finished, waiting for the rest of the party. {time} {delta_text} {done} {total}
   finished-party: "{lap_text}&a&lFINISH &8| &eTime: &f{time} {delta_text} &8| &7Waiting for the party &f({done}/{total})"
+  # Waiting in a competitive lobby (/bre ranked, the ranked menu) - refreshed four times a second.
+  # {arena} {players} {teams} {min} {max} {missing} {seconds} {queued}   (players / teams / max = the match that would start)
+  comp-waiting: "&6&lRANKED &8| &f{arena} &8| &7Looking for opponents: &e{players}&7/&f{min} &7racers &8| &7leave: &f/bre ranked leave"
+  comp-waiting-teams: "&6&lRANKED &8| &f{arena} &8| &7Enough racers, but only &e{teams} &7team - waiting for a second one &8| &7leave: &f/bre ranked leave"
+  comp-countdown: "&6&lRANKED &8| &f{arena} &8| &aMatch starts in &f{seconds}s &8| &f{players}&7/&f{max} &7racers in &f{teams} &7teams"
+  comp-waiting-track: "&6&lRANKED &8| &f{arena} &8| &eMatch ready - all tracks are busy, starting as soon as one is free"
+  comp-next-match: "&6&lRANKED &8| &f{arena} &8| &7This lobby is full - you play the next match"
   # During the short pause after the finish. {time} {delta_text} (delta_text is empty without a previous best)
   finished: "{lap_text}&a&lFINISH &8| &eTime: &f{time} {delta_text}"
 
@@ -61,6 +68,37 @@ title:
     stay: 40
     fade-out: 8
   # event: shown to every racer when the lights sequence is about to begin
+  # Waiting in a competitive lobby: kept on screen while you wait. Same placeholders as actionbar.comp-*
+  comp-waiting:
+    title: "&e&lLooking for opponents"
+    subtitle: "&f{players}&7/&f{min} &7racers needed &8(max {max}) &8| &f{arena}"
+    fade-in: 0
+    stay: 40
+    fade-out: 10
+  comp-waiting-teams:
+    title: "&e&lWaiting for a second team"
+    subtitle: "&7A match needs at least &f2 teams &8| &f{players}&7 racers so far"
+    fade-in: 0
+    stay: 40
+    fade-out: 10
+  comp-countdown:
+    title: "&a&lMatch starts in {seconds}s"
+    subtitle: "&f{players}&7/&f{max} &7racers in &f{teams} &7teams - more can still join"
+    fade-in: 0
+    stay: 40
+    fade-out: 10
+  comp-waiting-track:
+    title: "&6&lAll tracks are busy"
+    subtitle: "&7Your match starts as soon as a track is free"
+    fade-in: 0
+    stay: 40
+    fade-out: 10
+  comp-next-match:
+    title: "&e&lLobby full"
+    subtitle: "&7You play in the next match"
+    fade-in: 0
+    stay: 40
+    fade-out: 10
   event-start:
     title: "&e&lGET READY"
     subtitle: "&7The start lights are about to begin"
@@ -278,6 +316,11 @@ arena:
   spawn-invalid-index: "&cGrid position must be a whole number of 1 or more (got &f{value}&c)."
   # {value}
   invalid-laps: "&cLaps must be a number from 1 to 999 (got &f{value}&c)."
+  # /bre displayname. {arena} {name}
+  display-name-set: "&aThe map &f{arena} &ais now called &f{name} &aon the website."
+  display-name-cleared: "&aThe map &f{arena} &anow uses its default name &f{name}&a."
+  # {max}
+  display-name-invalid: "&cA display name has 1-{max} characters and no color codes (&f&&c / &f§&c) - the website shows plain text."
   # {arena}
   maintenance-on: "&aThe map &f{arena} &ais now &cclosed &afor players (running races finish, nobody can join or be queued)."
   maintenance-off: "&aThe map &f{arena} &ais now &aopen &afor players."
@@ -346,6 +389,7 @@ arena:
     - " &8- &7Finish line: &f{finish}"
     - " &8- &7Checkpoints: &f{checkpoints}"
     - " &8- &7Start lamps: &f{lamps}"
+    - " &8- &7Name on the website: &f{display_name}"
     - " &8- &7Laps: &f{laps}"
     - " &8- &7Reset zones: &f{reset_zones}"
     - " &8- &7Track blocks: &f{track_blocks}"
@@ -540,8 +584,11 @@ ranking:
   # after a ranked race. {rating} {delta} (e.g. +12 / -7) {rank} (0 = not on the leaderboard yet)
   change: "&7Ranking: &f{rating} &8({delta}&8)"
   # /bre tracks
-  tracks-header: "&7Track ids for the website (&fid &7-> arena):"
-  tracks-line: "&f{id} &7-> {arena}"
+  tracks-header: "&7Track ids for the website (&fid &7-> arena &8(&7name on the website&8)&7):"
+  # {id} {arena} {name}
+  tracks-line: "&f{id} &7-> {arena} &8(&f{name}&8)"
+  # {id} {arena}
+  tracks-reserved: "&c{id} ({arena}) collides with other stat keys (fastest_lap / fastest_race_*) - rename the arena, its times would be mixed up."
   tracks-duplicate: "&c{id} is used by several arenas: {arenas} - rename one, their stats would be mixed."
 
 # ------------------------------------------------------------------------------------------------

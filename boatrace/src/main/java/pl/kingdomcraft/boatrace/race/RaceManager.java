@@ -173,6 +173,9 @@ public final class RaceManager {
 	private final Map<String, Long> compCountdowns = new HashMap<>();
 	/** lobbies told that every fitting track is busy (once) */
 	private final Set<String> compWaitingForTrack = new java.util.HashSet<>();
+	/** what a waiting player has on screen (signature of the title and when it was sent), see {@link #showLobbyInfo} */
+	private final Map<UUID, LobbyShown> lobbyShown = new HashMap<>();
+	private int lobbyTicker;
 	/** player -> epoch ms until which they may not queue for competitive (left a running match) */
 	private final Map<UUID, Long> leaverCooldowns = new HashMap<>();
 	/** same lineup bonus, in memory */
@@ -1947,6 +1950,9 @@ public final class RaceManager {
 
 		this.processCompetitive();
 
+		// the player sees where they stand right now, not only with the next refresh
+		this.showLobbyInfo(true);
+
 		return CompJoinResult.QUEUED;
 	}
 
@@ -2202,6 +2208,9 @@ public final class RaceManager {
 		final Long end = this.compCountdowns.get(key);
 
 		if (!ready) {
+			// not ready any more: a later start gets announced (and shown) as a fresh "waiting for a track" if needed
+			this.compWaitingForTrack.remove(key);
+
 			if (end != null) {
 				this.compCountdowns.remove(key);
 				this.tellLobby(entries, "comp.countdown-cancelled", "players", players, "min", min);
@@ -2274,6 +2283,138 @@ public final class RaceManager {
 		}
 
 		this.startCompetitiveMatch(arena, world, teams);
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Competitive lobby: live information on the action bar and the title for everybody who waits
+	// ------------------------------------------------------------------------------------------
+
+	/** How often a title that is meant to stay is sent again (it lasts 2 seconds on the client). */
+	private static final long LOBBY_TITLE_REFRESH_MS = 1500L;
+
+	/** What a waiting player has on screen: the signature of the last title and the time it was sent. */
+	private record LobbyShown(String signature, long at) {
+	}
+
+	/**
+	 * Tells every waiting player where the lobby stands - action bar (4 times a second) and title (when something
+	 * changes, and kept on screen) - so nobody is left without information and nobody clicks the join button again.
+	 * States: {@code waiting} (not enough racers), {@code waiting-teams} (enough racers but only one team),
+	 * {@code countdown}, {@code waiting-track} (ready, every track is busy) and {@code next-match} (the lobby is full,
+	 * this team plays the next match). The numbers are those of the match that would start.
+	 *
+	 * @param force skip the 4-a-second throttle
+	 */
+	private void showLobbyInfo(final boolean force) {
+		if (this.compQueue.isEmpty()) {
+			if (!this.lobbyShown.isEmpty())
+				this.clearLobbyDisplays(java.util.Collections.emptySet());
+
+			return;
+		}
+
+		if (!this.settings.compLobbyActionBar && !this.settings.compLobbyTitle)
+			return;
+
+		if (!force && ++this.lobbyTicker % 5 != 0)
+			return;
+
+		final long now = System.currentTimeMillis();
+		final Map<String, List<CompEntry>> lobbies = new java.util.LinkedHashMap<>();
+		final Set<UUID> waiting = new java.util.HashSet<>();
+
+		for (final CompEntry entry : this.compQueue)
+			lobbies.computeIfAbsent(entry.key(), k -> new ArrayList<>()).add(entry);
+
+		for (final Map.Entry<String, List<CompEntry>> lobby : lobbies.entrySet()) {
+			final String key = lobby.getKey();
+			final List<CompEntry> entries = lobby.getValue();
+			final List<Integer> sizes = new ArrayList<>();
+
+			for (final CompEntry entry : entries)
+				sizes.add(entry.members.size());
+
+			final int max = this.lobbyMax(key);
+			final int min = this.lobbyMin(key);
+			final List<Integer> selected = LobbyFill.select(sizes, max, this.settings.teamColors.size(), this.settings.compMaxTeamSize);
+			final int players = LobbyFill.players(sizes, selected);
+			final boolean ready = selected.size() >= 2 && players >= min;
+			final Long end = this.compCountdowns.get(key);
+			final int seconds = end != null ? (int) Math.max(0L, (end - now + 999L) / 1000L) : this.settings.compCountdownSeconds;
+			final Arena arena = "*".equals(key) ? null : this.arenas.get(key);
+
+			for (int index = 0; index < entries.size(); index++) {
+				final String state;
+
+				if (!selected.contains(index))
+					state = "next-match";
+				else if (!ready)
+					state = players < min ? "waiting" : "waiting-teams";
+				else if (this.compWaitingForTrack.contains(key) && (players >= max || this.settings.compCountdownSeconds == 0 || end != null && end <= now))
+					// a start is being attempted (full lobby / countdown over) and every track is busy
+					state = "waiting-track";
+				else
+					state = "countdown";
+
+				for (final UUID member : entries.get(index).members) {
+					final Player player = Bukkit.getPlayer(member);
+
+					if (player == null)
+						continue;
+
+					waiting.add(member);
+					this.showLobbyTo(player, state, now, "arena", arena != null ? arena.getName() : Msg.text("comp.any-arena"), "players", players, "teams", selected.size(),
+							"min", min, "max", max, "missing", Math.max(0, min - players), "seconds", seconds, "queued", this.queuedPlayers(entries));
+				}
+			}
+		}
+
+		this.clearLobbyDisplays(waiting);
+	}
+
+	private int queuedPlayers(final List<CompEntry> entries) {
+		int count = 0;
+
+		for (final CompEntry entry : entries)
+			count += entry.members.size();
+
+		return count;
+	}
+
+	private void showLobbyTo(final Player player, final String state, final long now, final Object... placeholders) {
+		final LobbyShown before = this.lobbyShown.get(player.getUniqueId());
+		final String signature = state + java.util.Arrays.toString(placeholders);
+		final boolean changed = before == null || !before.signature().equals(signature);
+		final boolean refresh = this.settings.compLobbyTitleAlways && before != null && now - before.at() >= LOBBY_TITLE_REFRESH_MS;
+
+		if (this.settings.compLobbyActionBar)
+			Msg.actionBar(player, "actionbar.comp-" + state, placeholders);
+
+		if (this.settings.compLobbyTitle && (changed || refresh)) {
+			Msg.title(player, "comp-" + state, placeholders);
+			this.lobbyShown.put(player.getUniqueId(), new LobbyShown(signature, now));
+
+		} else if (before == null || changed)
+			this.lobbyShown.put(player.getUniqueId(), new LobbyShown(signature, before == null ? now : before.at()));
+	}
+
+	/** Players who are not waiting any more lose the lobby title and action bar - unless a match started for them. */
+	private void clearLobbyDisplays(final Set<UUID> stillWaiting) {
+		for (final java.util.Iterator<UUID> it = this.lobbyShown.keySet().iterator(); it.hasNext();) {
+			final UUID uuid = it.next();
+
+			if (stillWaiting.contains(uuid))
+				continue;
+
+			it.remove();
+
+			final Player player = Bukkit.getPlayer(uuid);
+
+			if (player != null && !this.sessions.containsKey(uuid)) {
+				player.clearTitle();
+				player.sendActionBar(net.kyori.adventure.text.Component.empty());
+			}
+		}
 	}
 
 	private void tellLobby(final List<CompEntry> entries, final String key, final Object... placeholders) {
@@ -3006,6 +3147,8 @@ public final class RaceManager {
 			this.processQueues();
 			this.processCompetitive();
 		}
+
+		this.showLobbyInfo(false);
 
 		if (this.sessions.isEmpty())
 			return;

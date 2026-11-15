@@ -78,6 +78,11 @@ public final class Settings {
 	public int compMaxTeamSize = 4;
 	/** countdown once the lobby has enough racers; a full lobby starts at once */
 	public int compCountdownSeconds = 30;
+	/** live information (action bar / title) for everybody waiting in a competitive lobby */
+	public boolean compLobbyActionBar = true;
+	public boolean compLobbyTitle = true;
+	/** keep the title on screen the whole time (false = only when something changes) */
+	public boolean compLobbyTitleAlways = true;
 	/** ELO points at stake in a competitive match (the casual k is ranking.k-factor) */
 	public double compK = 48.0D;
 	/** points by finishing position (index 0 = 1st place); a team scores the average of its members */
@@ -325,6 +330,9 @@ public final class Settings {
 		this.compMinPlayers = Math.max(2, c.getInt("competitive.min-players", 4));
 		this.compMaxTeamSize = Math.max(1, c.getInt("competitive.max-team-size", 4));
 		this.compCountdownSeconds = Math.max(0, c.getInt("competitive.countdown-seconds", 30));
+		this.compLobbyActionBar = c.getBoolean("competitive.lobby-display.action-bar", true);
+		this.compLobbyTitle = c.getBoolean("competitive.lobby-display.title", true);
+		this.compLobbyTitleAlways = c.getBoolean("competitive.lobby-display.title-always", true);
 		this.compK = Math.max(1.0D, c.getDouble("competitive.k-factor", 48.0D));
 		this.compLeaverPenalty = Math.max(0, c.getInt("competitive.leaver.rating-penalty", 15));
 		this.compLeaverCooldownMs = Math.max(0L, Math.round(c.getDouble("competitive.leaver.cooldown-minutes", 5.0D) * 60_000L));

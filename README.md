@@ -50,6 +50,7 @@ Admin (`boatrace.admin`):
 | `admin time add\|remove <player> <time> [arena]`, `admin time reset <player> [arena]`, `admin blacklist <player>` | Time / ban management. |
 | `gui [menu] [player]` | Opens a menu (`unranked`, `ranked`, your own - see Menus) silently. `/bre gui` and `/bre gui <menu>` are for everybody; a `[player]` (NPCs, hub signs, command blocks, console) needs `boatrace.admin`. `/bre gui <player>` opens the default menu for that player. |
 | `spectate <player\|arena\|off>` | Spectator mode attached to a racer, or to a racer on that map; `off` returns you. |
+| `displayname <arena> <name\|clear>` | How the map is called on the website, e.g. `Monaco Grand Prix` (default: the arena name with `_` and `-` as spaces; no color codes, max 48 characters). Shown in `info` and `tracks`. |
 | `maintenance <arena> <true\|false>` | Closes / opens a map for players: it stays in the menu but disabled (`guis.yml` `maintenance:`), is never picked by random, a join shows `race.maintenance`, its queue is cancelled. Races already running finish; admins (`boatrace.admin`) can still join with `/bre join <arena>`. Also shown in `list` / `info`. |
 | `tracks` | Track ids for the website stats (`fastest_<track>`) -> arena; warns about duplicates. |
 | `ranked <arena\|random> [player]`, `ranked leave\|list` | Competitive lobby (everybody; `[player]` needs `boatrace.join.others`). Aliases `competitive`, `comp`. |
@@ -125,6 +126,7 @@ All data lives in the shared MariaDB database configured under `Server` / `Datab
 | `boatrace_records` | Personal best per (arena, player) of the standard **single-lap** race, with splits and `server_name` (= `Server.Name` of the server it was driven on). A record is only ever replaced by a faster time, decided by the database, so several servers can write at once. Multi-lap races never touch it. |
 | `boatrace_runs` | Every finished single-lap race: time, penalty, splits, `personal_best`, `server_name`, `server_group`, `finished_at` (epoch ms) - for a web panel. |
 | `boatrace_event_results` | The total time of every finished **multi-lap** race (laps > 1): `arena`, `laps`, `uuid`, `name`, `total_ms`, `penalty_ms`, `splits`, `finish_position` / `field_size` (event or party, 0 / 1 for solo), `server_name`, `server_group`, `finished_at`. The table for event leaderboards. |
+| `boatrace_tracks` | Which map is which, for the website: per game server and arena `arena_key` (lower case, = `arena` of the tables above), `track_id` (the id in the CaptainHook stat keys), **`display_name`**, `laps`, `ready` / `competitive` / `maintenance`. Written at start, after every arena change and `/bre reload`; arenas that no longer exist are removed (each server only touches its own rows). |
 | `boatrace_blacklist` | Banned players (network wide). |
 | `boatrace_rewards` | Claimed one-time rewards (network wide - a reward can never be given twice). |
 | `boatrace_ratings` | Ranking per player (one for casual and competitive): `rating`, `games`, `wins`, `streak` (current "not last" run), `best_streak`, `comp_games`, `comp_wins`. Relative updates, safe across servers. |
@@ -215,6 +217,8 @@ A busy map (no free instance, no fallback copy, no free alternative arena) puts 
 
 **Holograms (PlaceholderAPI)** – see Placeholders below. HolographicDisplays: put the placeholder straight into the line, e.g. `#1 %boatrace_rating_top_player_1% %boatrace_rating_top_value_1%`.
 
+**Rankings per map on the website** – a time only means something on ONE map (a map can take 30 s or 5 min). Per map: `fastest_race_<track>` (whole race) and `fastest_<track>` (best lap). **Not per map - never rank by them:** `fastest_lap` and `top_avg_speed` are records over all maps. The readable map names for the website are in the table `boatrace_tracks` (see Database), `/bre displayname` sets them. `/bre tracks` warns about ids that collide (`lap`, `race_*`, or two arenas with the same id). The prompt for the website agent: [docs/website-per-map-rankings-prompt.md](docs/website-per-map-rankings-prompt.md).
+
 **Known limits** – the ranking cache is refreshed every `records.refresh-seconds` (30 s): right after switching servers a player may briefly see old points (nothing is lost in the database). The daily XP cap is in memory (reset by a restart).
 
 ## Casual and Competitive (summary)
@@ -227,6 +231,8 @@ A busy map (no free instance, no fallback copy, no free alternative arena) puts 
 | Armor / tag | no | yes |
 
 **One rating per player** – parties are temporary, so there is no team ranking. Everybody plays for their own `rating`; a competitive match gives + for a team win, − for a weaker result.
+
+**Lobby information** – a player waiting in a lobby sees live information on the **title and the action bar** (`competitive.lobby-display`; texts `title.comp-*` / `actionbar.comp-*`): racers found / needed, the countdown (every second), "need a second team", "all tracks are busy - starting as soon as one is free", "lobby full - you play the next match", and how to leave (`/bre ranked leave`). It updates by itself (action bar 4× a second, the title when something changes and kept on screen), so there is no need to click the join button again - a second click in the menu leaves the lobby. The screen is cleared when the player leaves the lobby.
 
 **Enable** – `config.yml` `competitive.enabled: true` (off by default). Menu: `/bre gui ranked` (`guis.yml` menu `ranked`; the casual menu has a button that opens it).
 
