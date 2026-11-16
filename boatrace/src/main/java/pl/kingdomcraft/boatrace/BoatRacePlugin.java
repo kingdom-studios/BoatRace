@@ -208,6 +208,10 @@ public final class BoatRacePlugin extends SimplePlugin {
 		return this.races;
 	}
 
+	public CaptainHookHook getCaptainHook() {
+		return this.captainHook;
+	}
+
 	public PartyManager getParties() {
 		return this.parties;
 	}

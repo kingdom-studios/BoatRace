@@ -266,6 +266,10 @@ captainhook:
 competitive:
   enabled: false
   min-players: 4            # default for arenas without their own min-players
+  # Teams needed before the countdown starts (default for arenas without their own min-teams, /bre compset <arena> minteams).
+  # 2 = a match starts as soon as there are two teams (and min-players racers) - like before this option existed.
+  # Never more than the number of team colors / grid positions.
+  min-teams: 2
   max-team-size: 4
   countdown-seconds: 30     # once min-players is reached; a full lobby starts at once
   # What a waiting player sees (texts: messages.yml actionbar.comp-* / title.comp-*): how many racers were found, how many

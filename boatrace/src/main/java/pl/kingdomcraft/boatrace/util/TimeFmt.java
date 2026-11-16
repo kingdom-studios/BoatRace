@@ -38,6 +38,19 @@ public final class TimeFmt {
 		return (deltaMs <= 0 ? "-" : "+") + seconds2(deltaMs);
 	}
 
+	/** How long ago, short: "45 s", "12 min", "3 h" (negative = 0). */
+	public static String ago(final long millis) {
+		final long seconds = Math.max(0L, millis / 1000L);
+
+		if (seconds < 120L)
+			return seconds + " s";
+
+		if (seconds < 7200L)
+			return seconds / 60L + " min";
+
+		return seconds / 3600L + " h";
+	}
+
 	/**
 	 * Parses admin input: "12.5", "12.5s" (seconds) or "1500ms" (milliseconds).
 	 * A bare number is ALWAYS seconds.

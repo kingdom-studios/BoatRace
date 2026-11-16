@@ -10,13 +10,14 @@ import pl.kingdomcraft.boatrace.arena.Arena;
 /**
  * /bre compset <arena> on|off            competitive matches on this arena (default: on)
  * /bre compset <arena> min|max <number>  racers needed for the countdown / most racers of a match
+ * /bre compset <arena> minteams <number> teams needed for the countdown (default: competitive.min-teams, 2)
  * /bre compset <arena> reset             back to the config.yml defaults (max = grid positions)
  * /bre compset <arena> info
  */
 final class CompSetSub extends RaceSubCommand {
 
 	CompSetSub(final SimpleCommandGroup group) {
-		super(group, "compset", "Competitive settings of an arena (on/off, min / max racers).", "<arena> <on|off|min|max|reset|info> [number]", 2, true);
+		super(group, "compset", "Competitive settings of an arena (on/off, min / max racers, min teams).", "<arena> <on|off|min|max|minteams|reset|info> [number]", 2, true);
 	}
 
 	@Override
@@ -25,6 +26,7 @@ final class CompSetSub extends RaceSubCommand {
 				"/{label} compset <arena> on|off    &7- competitive matches on this map",
 				"/{label} compset <arena> min <n>   &7- racers needed before the countdown starts",
 				"/{label} compset <arena> max <n>   &7- most racers of a match (never more than the grid positions)",
+				"/{label} compset <arena> minteams <n> &7- teams needed before the countdown starts (default competitive.min-teams)",
 				"/{label} compset <arena> reset     &7- config.yml defaults (max = grid positions)",
 				"/{label} compset <arena> info"
 		};
@@ -63,7 +65,32 @@ final class CompSetSub extends RaceSubCommand {
 					arena.setCompetitive(arena.getCompetitiveEnabledRaw(), arena.getCompetitiveMinRaw(), value);
 			}
 
-			case "reset" -> arena.setCompetitive(null, null, null);
+			case "minteams" -> {
+				if (this.args.length < 3)
+					this.returnInvalidArgs();
+
+				final int value;
+
+				try {
+					value = Integer.parseInt(this.args[2]);
+
+				} catch (final NumberFormatException ex) {
+					this.fail("comp.set-not-a-number", "value", this.args[2]);
+					return;
+				}
+
+				if (value < 2) {
+					this.fail("comp.set-teams-too-small");
+					return;
+				}
+
+				arena.setCompetitiveMinTeams(value);
+			}
+
+			case "reset" -> {
+				arena.setCompetitive(null, null, null);
+				arena.setCompetitiveMinTeams(null);
+			}
 
 			case "info" -> {
 			}
@@ -78,7 +105,8 @@ final class CompSetSub extends RaceSubCommand {
 			this.plugin().getArenas().save();
 
 		this.info("comp.set-info", "arena", arena.getName(), "enabled", arena.isCompetitive() ? "&aon" : "&coff",
-				"min", arena.competitiveMin(this.plugin().getSettings().compMinPlayers), "max", arena.competitiveMax(), "spawns", arena.getSpawns().size());
+				"min", arena.competitiveMin(this.plugin().getSettings().compMinPlayers), "min_teams", this.plugin().getRaces().competitiveMinTeams(arena),
+				"max", arena.competitiveMax(), "spawns", arena.getSpawns().size());
 	}
 
 	@Override
@@ -87,7 +115,7 @@ final class CompSetSub extends RaceSubCommand {
 			return this.completeLastWord(this.arenaNames());
 
 		if (this.args.length == 2)
-			return this.completeLastWord("on", "off", "min", "max", "reset", "info");
+			return this.completeLastWord("on", "off", "min", "max", "minteams", "reset", "info");
 
 		return new ArrayList<>();
 	}

@@ -1871,7 +1871,7 @@ public final class RaceManager {
 	}
 
 	/** A lobby somebody waits in, for /bre ranked list and the GUI. */
-	public record CompLobbyInfo(String arena, int players, int teams, int min, int max, int countdown) {
+	public record CompLobbyInfo(String arena, int players, int teams, int min, int max, int countdown, int minTeams) {
 	}
 
 	private static String lobbyKey(final String arena) {
@@ -2000,7 +2000,7 @@ public final class RaceManager {
 		final int countdown = end == null ? -1 : (int) Math.max(0L, (end - System.currentTimeMillis() + 999L) / 1000L);
 		final Arena arena = "*".equals(key) ? null : this.arenas.get(key);
 
-		return new CompLobbyInfo(arena != null ? arena.getName() : Msg.text("comp.any-arena"), players, teams, this.lobbyMin(key), this.lobbyMax(key), countdown);
+		return new CompLobbyInfo(arena != null ? arena.getName() : Msg.text("comp.any-arena"), players, teams, this.lobbyMin(key), this.lobbyMax(key), countdown, this.lobbyMinTeams(key));
 	}
 
 	/** Racers needed for the countdown: the arena's min-players; the "any map" lobby takes the lowest of all arenas. */
@@ -2020,6 +2020,29 @@ public final class RaceManager {
 	}
 
 	/** Most racers of a match: the arena's max-players; the "any map" lobby takes the highest of all arenas. */
+	/** Teams the arena needs to start a match: its own min-teams or the config.yml default, within what can exist. */
+	public int competitiveMinTeams(final Arena arena) {
+		final Integer own = arena.getCompetitiveMinTeamsRaw();
+
+		return LobbyFill.minTeams(own != null ? own : this.settings.compMinTeams, this.settings.teamColors.size(), arena.competitiveMax());
+	}
+
+	/** Teams needed before the lobby starts its countdown; the "any map" lobby takes the lowest of all arenas (like the racers). */
+	private int lobbyMinTeams(final String key) {
+		if (!"*".equals(key)) {
+			final Arena arena = this.arenas.get(key);
+
+			return arena != null ? this.competitiveMinTeams(arena) : LobbyFill.minTeams(this.settings.compMinTeams, this.settings.teamColors.size(), Integer.MAX_VALUE);
+		}
+
+		int min = Integer.MAX_VALUE;
+
+		for (final Arena arena : this.compArenas(1))
+			min = Math.min(min, this.competitiveMinTeams(arena));
+
+		return min == Integer.MAX_VALUE ? LobbyFill.minTeams(this.settings.compMinTeams, this.settings.teamColors.size(), Integer.MAX_VALUE) : min;
+	}
+
 	private int lobbyMax(final String key) {
 		if (!"*".equals(key)) {
 			final Arena arena = this.arenas.get(key);
@@ -2203,7 +2226,8 @@ public final class RaceManager {
 		final int min = this.lobbyMin(key);
 		final List<Integer> selected = LobbyFill.select(sizes, max, this.settings.teamColors.size(), this.settings.compMaxTeamSize);
 		final int players = LobbyFill.players(sizes, selected);
-		final boolean ready = selected.size() >= 2 && players >= min;
+		final int minTeams = this.lobbyMinTeams(key);
+		final boolean ready = LobbyFill.ready(selected.size(), players, minTeams, min);
 		final long now = System.currentTimeMillis();
 		final Long end = this.compCountdowns.get(key);
 
@@ -2213,7 +2237,7 @@ public final class RaceManager {
 
 			if (end != null) {
 				this.compCountdowns.remove(key);
-				this.tellLobby(entries, "comp.countdown-cancelled", "players", players, "min", min);
+				this.tellLobby(entries, "comp.countdown-cancelled", "players", players, "min", min, "teams", selected.size(), "min_teams", minTeams);
 			}
 
 			return;
@@ -2247,7 +2271,8 @@ public final class RaceManager {
 			final List<Arena> free = new ArrayList<>();
 
 			for (final Arena candidate : this.compArenas(players))
-				if (candidate.competitiveMin(this.settings.compMinPlayers) <= players && this.freeInstanceWorld(candidate, null) != null)
+				if (candidate.competitiveMin(this.settings.compMinPlayers) <= players && this.competitiveMinTeams(candidate) <= selected.size()
+						&& this.freeInstanceWorld(candidate, null) != null)
 					free.add(candidate);
 
 			if (!free.isEmpty()) {
@@ -2338,7 +2363,8 @@ public final class RaceManager {
 			final int min = this.lobbyMin(key);
 			final List<Integer> selected = LobbyFill.select(sizes, max, this.settings.teamColors.size(), this.settings.compMaxTeamSize);
 			final int players = LobbyFill.players(sizes, selected);
-			final boolean ready = selected.size() >= 2 && players >= min;
+			final int minTeams = this.lobbyMinTeams(key);
+			final boolean ready = LobbyFill.ready(selected.size(), players, minTeams, min);
 			final Long end = this.compCountdowns.get(key);
 			final int seconds = end != null ? (int) Math.max(0L, (end - now + 999L) / 1000L) : this.settings.compCountdownSeconds;
 			final Arena arena = "*".equals(key) ? null : this.arenas.get(key);
@@ -2364,7 +2390,8 @@ public final class RaceManager {
 
 					waiting.add(member);
 					this.showLobbyTo(player, state, now, "arena", arena != null ? arena.getName() : Msg.text("comp.any-arena"), "players", players, "teams", selected.size(),
-							"min", min, "max", max, "missing", Math.max(0, min - players), "seconds", seconds, "queued", this.queuedPlayers(entries));
+							"min", min, "max", max, "missing", Math.max(0, min - players), "min_teams", minTeams, "missing_teams", Math.max(0, minTeams - selected.size()),
+							"seconds", seconds, "queued", this.queuedPlayers(entries));
 				}
 			}
 		}

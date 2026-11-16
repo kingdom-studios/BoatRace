@@ -54,7 +54,8 @@ Admin (`boatrace.admin`):
 | `maintenance <arena> <true\|false>` | Closes / opens a map for players: it stays in the menu but disabled (`guis.yml` `maintenance:`), is never picked by random, a join shows `race.maintenance`, its queue is cancelled. Races already running finish; admins (`boatrace.admin`) can still join with `/bre join <arena>`. Also shown in `list` / `info`. |
 | `tracks` | Track ids for the website stats (`fastest_<track>`) -> arena; warns about duplicates. |
 | `ranked <arena\|random> [player]`, `ranked leave\|list` | Competitive lobby (everybody; `[player]` needs `boatrace.join.others`). Aliases `competitive`, `comp`. |
-| `compset <arena> on\|off\|min <n>\|max <n>\|reset\|info` | Competitive settings of an arena (min = countdown starts, max = start at once, never above the grid positions). |
+| `compset <arena> on\|off\|min <n>\|max <n>\|minteams <n>\|reset\|info` | Competitive settings of an arena (min = countdown starts, max = start at once, never above the grid positions, minteams = teams needed to start). |
+| `sitecheck` | Diagnoses the website data path: CaptainHook link, queue/skip counters, last report, `boatrace_tracks` sync, DB. Run it when the site looks stale. |
 | `reload` | Reloads config.yml, messages.yml, guis.yml and arenas.yml. |
 
 Time format: `12.5` / `12.5s` = seconds, `1500ms` = milliseconds.
@@ -237,6 +238,8 @@ A busy map (no free instance, no fallback copy, no free alternative arena) puts 
 **Enable** – `config.yml` `competitive.enabled: true` (off by default). Menu: `/bre gui ranked` (`guis.yml` menu `ranked`; the casual menu has a button that opens it).
 
 **Limits per arena** – `/bre compset <arena> min 4` / `max 8` / `on|off` / `reset` / `info` (or `arenas.yml` `competitive: { enabled, min-players, max-players }`). Not set = `competitive.min-players` (4) and max = number of spawns. The spawns do not need to change.
+
+**Minimum teams** – `competitive.min-teams` in `config.yml` (default `2` = the old behaviour; never below 2) or per arena `/bre compset <arena> minteams 3` (`arenas.yml` `competitive.min-teams`). The match starts only when both the player minimum AND the team minimum are met; the value is capped by the number of team colours and by the arena capacity. Lobby texts can use `{min_teams}` / `{missing_teams}`. Existing configs keep working: the key is added automatically with the old value.
 
 **Joining** – `/bre ranked <arena|random>` / GUI button (second click = leave). Party leader = the whole team. Solo = a team of 1. Biggest team: `max-team-size` (4).
 * The lobby takes teams in order while they fit (max racers, max teams = number of colors). The rest waits for the next match.

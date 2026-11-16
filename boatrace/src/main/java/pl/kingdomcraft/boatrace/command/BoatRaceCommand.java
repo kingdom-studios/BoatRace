@@ -55,6 +55,7 @@ public final class BoatRaceCommand extends SimpleCommandGroup {
 
 		// admin: management
 		this.registerSubcommand(new AdminSub(this));
+		this.registerSubcommand(new SiteCheckSub(this));
 		this.registerSubcommand(new ReloadSub(this));
 	}
 

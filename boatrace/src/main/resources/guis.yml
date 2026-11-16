@@ -46,9 +46,9 @@
 #   any item:      {player} {maps} (maps the random button can pick for this player)
 #   with a map:    {arena} {status} {players} {slots} {laps} {queue} {access} {permission}
 #                  players / slots = racing now / grid positions of the map
-#   ranked item (it has a ranked-map or random-map ranked action): {players} {teams} {min} {max} {countdown} {queued}
+#   ranked item (it has a ranked-map or random-map ranked action): {players} {teams} {min} {max} {min_teams} {countdown} {queued}
 #                  = the competitive lobby of the map; {playing} = racing now
-#   always with an arena / ranked item: {lobby_players} {lobby_teams} {lobby_min} {lobby_max}
+#   always with an arena / ranked item: {lobby_players} {lobby_teams} {lobby_min} {lobby_max} {lobby_min_teams}
 # ---------------------------------------------------------------------------------------------------------------------
 
 default-menu: unranked

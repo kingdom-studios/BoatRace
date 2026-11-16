@@ -158,6 +158,7 @@ public final class ArenaManager {
 			arena.setCompetitive(section.isBoolean("competitive.enabled") ? section.getBoolean("competitive.enabled") : null,
 					section.isInt("competitive.min-players") ? section.getInt("competitive.min-players") : null,
 					section.isInt("competitive.max-players") ? section.getInt("competitive.max-players") : null);
+			arena.setCompetitiveMinTeams(section.isInt("competitive.min-teams") ? section.getInt("competitive.min-teams") : null);
 			arena.setRewardMode(Arena.RewardMode.parse(section.getString("reward.mode", "NONE")));
 			arena.getRewardCommands().addAll(section.getStringList("reward.commands"));
 
@@ -248,6 +249,9 @@ public final class ArenaManager {
 
 			if (arena.getCompetitiveMaxRaw() != null)
 				yaml.set(base + ".competitive.max-players", arena.getCompetitiveMaxRaw());
+
+			if (arena.getCompetitiveMinTeamsRaw() != null)
+				yaml.set(base + ".competitive.min-teams", arena.getCompetitiveMinTeamsRaw());
 			yaml.set(base + ".reward.mode", arena.getRewardMode().name());
 			yaml.set(base + ".reward.commands", new ArrayList<>(arena.getRewardCommands()));
 		}

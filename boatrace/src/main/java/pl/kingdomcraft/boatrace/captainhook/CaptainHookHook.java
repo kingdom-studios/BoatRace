@@ -39,6 +39,18 @@ public final class CaptainHookHook {
 	private final Settings settings;
 
 	private CaptainHookGateway gateway;
+
+	// what happened to the race stats since the server started (see /bre sitecheck); futures complete on the main thread
+	private int statsSent;
+	private int statsAcknowledged;
+	private int statsFailed;
+	private int racesSkipped;
+	private long lastAcknowledgedAt;
+	private String lastError = "";
+	private long lastErrorAt;
+	private String lastSkipReason = "";
+	private long lastSkipAt;
+
 	private long lastLog;
 	private int suppressed;
 
@@ -130,6 +142,10 @@ public final class CaptainHookHook {
 		final String implausible = this.implausible(race);
 
 		if (implausible != null) {
+			this.racesSkipped++;
+			this.lastSkipReason = implausible + " (" + race.track() + ")";
+			this.lastSkipAt = System.currentTimeMillis();
+
 			this.plugin.getLogger().warning("Not reporting the race of " + player.getName() + " on " + race.track() + " to CaptainHook: " + implausible);
 			return;
 		}
@@ -328,10 +344,52 @@ public final class CaptainHookHook {
 	}
 
 	private void watch(final CompletableFuture<?> future, final String what) {
+		final boolean stats = "race stats".equals(what);
+
+		if (stats)
+			this.statsSent++;
+
 		future.whenComplete((ignored, error) -> {
-			if (error != null)
+			if (error != null) {
+				if (stats) {
+					final Throwable cause = unwrap(error);
+					final CaptainHookGateway current = this.gateway;
+					final String code = current != null ? current.errorCode(cause) : null;
+
+					this.statsFailed++;
+					this.lastError = code != null ? code : cause.toString();
+					this.lastErrorAt = System.currentTimeMillis();
+				}
+
 				this.logFailure(what, error);
+
+			} else if (stats) {
+				// the proxy confirmed: the stats are in its database
+				this.statsAcknowledged++;
+				this.lastAcknowledgedAt = System.currentTimeMillis();
+			}
 		});
+	}
+
+	/** What happened to the race stats since the server started - for /bre sitecheck. */
+	public record Status(boolean enabled, boolean connected, boolean proxyAvailable, String game, int sent, int acknowledged, int failed, int skipped,
+			long lastAcknowledgedAt, String lastError, long lastErrorAt, String lastSkipReason, long lastSkipAt) {
+	}
+
+	public Status status() {
+		final CaptainHookGateway current = this.gateway;
+		boolean proxy = false;
+
+		if (current != null)
+			try {
+				proxy = current.proxyAvailable();
+
+			} catch (final Throwable ignored) {
+				// CaptainHook is not usable (yet) - shown as "not available"
+			}
+
+		return new Status(this.settings.chEnabled, current != null, proxy, this.settings.chGame, this.statsSent, this.statsAcknowledged, this.statsFailed,
+				this.racesSkipped, this.lastAcknowledgedAt, this.lastError, this.lastErrorAt, this.lastSkipReason, this.lastSkipAt);
 	}
 
 	private void logFailure(final String what, final Throwable error) {

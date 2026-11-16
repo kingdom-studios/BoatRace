@@ -36,6 +36,19 @@ public final class LobbyFill {
 		return selected;
 	}
 
+	/**
+	 * Teams needed to start a match: the wanted number (arena setting or config.yml default), but at least 2 (a team
+	 * cannot play against itself) and never more than can exist (team colors, grid positions).
+	 */
+	public static int minTeams(final int wanted, final int colors, final int capacity) {
+		return Math.max(2, Math.min(wanted, Math.min(colors, capacity)));
+	}
+
+	/** A lobby may start its countdown: enough teams AND enough racers. */
+	public static boolean ready(final int teams, final int players, final int minTeams, final int minPlayers) {
+		return teams >= minTeams && players >= minPlayers;
+	}
+
 	/** @return the number of racers of the selected teams */
 	public static int players(final List<Integer> sizes, final List<Integer> selected) {
 		int players = 0;

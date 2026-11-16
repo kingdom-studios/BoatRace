@@ -23,6 +23,11 @@ final class CaptainHookGateway {
 		CaptainHookAPI.isProxyAvailable();
 	}
 
+	/** A request to the proxy could be sent right now (somebody on this server can carry it). */
+	boolean proxyAvailable() {
+		return CaptainHookAPI.isProxyAvailable();
+	}
+
 	CompletableFuture<Void> record(final String game, final List<StatChange> changes) {
 		final List<MinigameStat> stats = new ArrayList<>(changes.size());
 

@@ -371,11 +371,11 @@ public final class GuiManager implements Listener {
 			final String countdown = lobby.countdown() >= 0 ? Msg.text("gui.comp-countdown", "seconds", lobby.countdown()) : "";
 			final String queued = this.races.isInCompetitiveQueue(player.getUniqueId()) ? Msg.text("gui.comp-queued") : "";
 
-			ph.addAll(List.of("lobby_players", lobby.players(), "lobby_teams", lobby.teams(), "lobby_min", lobby.min(), "lobby_max", lobby.max(),
+			ph.addAll(List.of("lobby_players", lobby.players(), "lobby_teams", lobby.teams(), "lobby_min", lobby.min(), "lobby_max", lobby.max(), "lobby_min_teams", lobby.minTeams(),
 					"lobby_countdown", countdown, "lobby_queued", queued));
 
 			if (ranked)
-				ph.addAll(List.of("players", lobby.players(), "teams", lobby.teams(), "min", lobby.min(), "max", lobby.max(), "countdown", countdown, "queued", queued));
+				ph.addAll(List.of("players", lobby.players(), "teams", lobby.teams(), "min", lobby.min(), "max", lobby.max(), "min_teams", lobby.minTeams(), "countdown", countdown, "queued", queued));
 		}
 
 		if (arena != null) {

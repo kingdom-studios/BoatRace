@@ -77,6 +77,8 @@ public final class Settings {
 	/** biggest team (a party); a solo player is a team of 1 */
 	public int compMaxTeamSize = 4;
 	/** countdown once the lobby has enough racers; a full lobby starts at once */
+	/** teams needed to start a match (default for arenas without their own min-teams); 2 = the classic behavior */
+	public int compMinTeams = 2;
 	public int compCountdownSeconds = 30;
 	/** live information (action bar / title) for everybody waiting in a competitive lobby */
 	public boolean compLobbyActionBar = true;
@@ -328,6 +330,7 @@ public final class Settings {
 	private void loadCompetitive(final FileConfiguration c) {
 		this.compEnabled = c.getBoolean("competitive.enabled", false);
 		this.compMinPlayers = Math.max(2, c.getInt("competitive.min-players", 4));
+		this.compMinTeams = Math.max(2, c.getInt("competitive.min-teams", 2));
 		this.compMaxTeamSize = Math.max(1, c.getInt("competitive.max-team-size", 4));
 		this.compCountdownSeconds = Math.max(0, c.getInt("competitive.countdown-seconds", 30));
 		this.compLobbyActionBar = c.getBoolean("competitive.lobby-display.action-bar", true);

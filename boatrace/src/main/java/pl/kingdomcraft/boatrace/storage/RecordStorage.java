@@ -71,6 +71,11 @@ public final class RecordStorage {
 	private HikariDataSource dataSource;
 	private BukkitTask refreshTask;
 
+	// last write of the track table (see /bre sitecheck); written on the IO thread
+	private volatile long tracksSyncedAt;
+	private volatile int tracksSyncedRows = -1;
+	private volatile String tracksSyncError = "";
+
 	private String serverName = "";
 	private String serverGroup = "";
 
@@ -269,6 +274,32 @@ public final class RecordStorage {
 		final List<TrackInfo> rows = List.copyOf(tracks);
 
 		this.async(connection -> {
+			try {
+				this.writeTracks(connection, server, now, rows);
+
+				this.tracksSyncError = "";
+				this.tracksSyncedRows = rows.size();
+				this.tracksSyncedAt = System.currentTimeMillis();
+
+			} catch (final SQLException ex) {
+				this.tracksSyncError = String.valueOf(ex.getMessage());
+				this.tracksSyncedAt = System.currentTimeMillis();
+
+				throw ex;
+			}
+		});
+	}
+
+	/** Result of the last track table write: when (epoch ms, 0 = none yet), how many maps, and the error ("" = none). */
+	public record TracksSync(long at, int rows, String error) {
+	}
+
+	public TracksSync tracksSync() {
+		return new TracksSync(this.tracksSyncedAt, this.tracksSyncedRows, this.tracksSyncError);
+	}
+
+	private void writeTracks(final Connection connection, final String server, final long now, final List<TrackInfo> rows) throws SQLException {
+		{
 			try (PreparedStatement ps = connection.prepareStatement("INSERT INTO " + TRACKS
 					+ " (server_name, arena_key, arena, track_id, display_name, laps, ready, competitive, maintenance, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
 					+ "ON DUPLICATE KEY UPDATE arena = VALUES(arena), track_id = VALUES(track_id), display_name = VALUES(display_name), laps = VALUES(laps), "
@@ -310,7 +341,7 @@ public final class RecordStorage {
 
 				ps.executeUpdate();
 			}
-		});
+		}
 	}
 
 	/** Flushes queued writes and closes the pool. Call from onDisable. */

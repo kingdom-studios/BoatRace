@@ -1,6 +1,8 @@
 package pl.kingdomcraft.boatrace.team;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
@@ -24,6 +26,44 @@ class CompetitiveLogicTest {
 		// no more teams than colors
 		assertEquals(List.of(0, 1), LobbyFill.select(List.of(1, 1, 1), 8, 2, 4));
 		assertEquals(5, LobbyFill.players(List.of(4, 1, 3), List.of(0, 1)));
+	}
+
+	@Test
+	void minimumTeamsDefaultsToTheClassicTwo() {
+		// the default (2) = exactly the old rule "at least two teams and enough racers"
+		assertEquals(2, LobbyFill.minTeams(2, 8, 8));
+		assertTrue(LobbyFill.ready(2, 4, 2, 4));
+		assertFalse(LobbyFill.ready(1, 4, 2, 4), "one team never plays");
+		assertFalse(LobbyFill.ready(2, 3, 2, 4), "too few racers");
+
+		// a higher wish: three teams needed
+		assertEquals(3, LobbyFill.minTeams(3, 8, 8));
+		assertFalse(LobbyFill.ready(2, 8, 3, 4), "two teams are not enough");
+		assertTrue(LobbyFill.ready(3, 4, 3, 4));
+	}
+
+	@Test
+	void minimumTeamsIsKeptWithinWhatCanExist() {
+		// never below 2 (even for 0 / 1 / negative values that slipped into a file)
+		assertEquals(2, LobbyFill.minTeams(0, 8, 8));
+		assertEquals(2, LobbyFill.minTeams(1, 8, 8));
+		assertEquals(2, LobbyFill.minTeams(-5, 8, 8));
+
+		// never more than the team colors (4 colors = at most 4 teams) or the grid positions (3 places = at most 3 teams)
+		assertEquals(4, LobbyFill.minTeams(10, 4, 8));
+		assertEquals(3, LobbyFill.minTeams(10, 8, 3));
+		assertEquals(2, LobbyFill.minTeams(10, 2, 8));
+	}
+
+	@Test
+	void aLobbyWithBigPartiesCanMissTheTeamMinimum() {
+		// capacity 8, min 3 teams: two parties of 4 fill the lobby with only 2 teams -> not ready, so nobody is forced to wait
+		// for a third team that can never fit; the rule just says "not ready" and the lobby waits for the queue to change
+		final List<Integer> sizes = List.of(4, 4, 1);
+		final List<Integer> selected = LobbyFill.select(sizes, 8, 8, 4);
+
+		assertEquals(List.of(0, 1), selected);
+		assertFalse(LobbyFill.ready(selected.size(), LobbyFill.players(sizes, selected), 3, 4));
 	}
 
 	@Test

@@ -29,9 +29,10 @@ actionbar:
   # A party member who finished, waiting for the rest of the party. {time} {delta_text} {done} {total}
   finished-party: "{lap_text}&a&lFINISH &8| &eTime: &f{time} {delta_text} &8| &7Waiting for the party &f({done}/{total})"
   # Waiting in a competitive lobby (/bre ranked, the ranked menu) - refreshed four times a second.
-  # {arena} {players} {teams} {min} {max} {missing} {seconds} {queued}   (players / teams / max = the match that would start)
+  # {arena} {players} {teams} {min} {max} {missing} {min_teams} {missing_teams} {seconds} {queued}
+  # (players / teams / max = the match that would start; min / min_teams = needed to start)
   comp-waiting: "&6&lRANKED &8| &f{arena} &8| &7Looking for opponents: &e{players}&7/&f{min} &7racers &8| &7leave: &f/bre ranked leave"
-  comp-waiting-teams: "&6&lRANKED &8| &f{arena} &8| &7Enough racers, but only &e{teams} &7team - waiting for a second one &8| &7leave: &f/bre ranked leave"
+  comp-waiting-teams: "&6&lRANKED &8| &f{arena} &8| &7Enough racers, but only &e{teams}&7/&f{min_teams} &7teams - waiting for more teams &8| &7leave: &f/bre ranked leave"
   comp-countdown: "&6&lRANKED &8| &f{arena} &8| &aMatch starts in &f{seconds}s &8| &f{players}&7/&f{max} &7racers in &f{teams} &7teams"
   comp-waiting-track: "&6&lRANKED &8| &f{arena} &8| &eMatch ready - all tracks are busy, starting as soon as one is free"
   comp-next-match: "&6&lRANKED &8| &f{arena} &8| &7This lobby is full - you play the next match"
@@ -76,8 +77,8 @@ title:
     stay: 40
     fade-out: 10
   comp-waiting-teams:
-    title: "&e&lWaiting for a second team"
-    subtitle: "&7A match needs at least &f2 teams &8| &f{players}&7 racers so far"
+    title: "&e&lWaiting for more teams"
+    subtitle: "&7A match needs at least &f{min_teams} teams &8| &f{teams}&7 so far"
     fade-in: 0
     stay: 40
     fade-out: 10
@@ -611,8 +612,8 @@ comp:
   # {seconds} {players} {max}
   countdown-started: "&aEnough racers! The match starts in &f{seconds}s &7({players}/{max} - more can still join)."
   countdown: "&7Match starts in &f{seconds}s &7({players}/{max})"
-  # {players} {min}
-  countdown-cancelled: "&cNot enough racers any more (&f{players}/{min}&c) - waiting for more."
+  # {players} {min} {teams} {min_teams}
+  countdown-cancelled: "&cNot enough racers or teams any more (&f{players}/{min}&c racers, &f{teams}/{min_teams}&c teams) - waiting for more."
   waiting-track: "&7The match is ready - waiting for a free track."
   queue-left: "&7You left the competitive lobby."
   queue-cancelled: "&cYour place in the competitive lobby was cancelled (party changed, a member left or started another race)."
@@ -633,7 +634,34 @@ comp:
   list-line: "&f{arena}&7: &f{players}&7 racers / &f{teams}&7 teams &8(min {min}, max {max}) &7start: &f{countdown}"
   list-empty: "&7Nobody is waiting for a competitive match."
   # /bre compset. {arena} {enabled} {min} {max} {spawns}
-  set-info: "&f{arena}&7: competitive {enabled}&7, min &f{min}&7, max &f{max} &8(grid positions: {spawns})"
+  # {min_teams} = teams needed to start
+  set-info: "&f{arena}&7: competitive {enabled}&7, min &f{min}&7 racers, &f{min_teams}&7 teams, max &f{max} &8(grid positions: {spawns})"
   # {value}
   set-not-a-number: "&c{value} is not a number."
   set-too-small: "&cA match needs at least 2 racers."
+  set-teams-too-small: "&cA match needs at least 2 teams."
+
+# ------------------------------------------------------------------------------------------------
+# /bre sitecheck - the data this server sends to the website
+# ------------------------------------------------------------------------------------------------
+sitecheck:
+  # {server} = Server.Name of config.yml (the owner of the rows in boatrace_tracks)
+  header: "&7Website data of server &f{server}&7:"
+  off: " &8- &cCaptainHook is switched off (captainhook.enabled: false) - NO race stats reach the website."
+  # {game}
+  not-found: " &8- &cCaptainHook-Bukkit is not installed / enabled on this server - NO race stats reach the website (game {game})."
+  # {game} {state}
+  link: " &8- &7CaptainHook link to the proxy (game &f{game}&7): {state}"
+  # since the server started. acknowledged = the proxy confirmed that the stats are in its database
+  stats: " &8- &7Race stats: sent &f{sent}&7, acknowledged &a{acknowledged}&7, failed &c{failed}&7, skipped as implausible &e{skipped}"
+  # {when} e.g. "12 min ago" / "never"
+  last-ack: " &8- &7Last race acknowledged by the proxy: &f{when}"
+  # {error} {when}  (no_carrier = nobody was online on this server to carry the message to the proxy)
+  last-error: " &8- &cLast failure: &f{error} &7({when} ago)"
+  # {reason} {when}
+  last-skip: " &8- &eLast race not reported: &f{reason} &7({when} ago)"
+  # {rows} {when} {server}
+  tracks: " &8- &7Map names (boatrace_tracks): &f{rows} map(s) written for &f{server}&7, last write &f{when} &7ago"
+  tracks-pending: " &8- &7Map names (boatrace_tracks): not written yet since the start."
+  # {error} {when}
+  tracks-error: " &8- &cMap names (boatrace_tracks) could NOT be written: &f{error} &7({when} ago)"

@@ -68,6 +68,7 @@ public final class Arena {
 	private Boolean competitiveEnabled;
 	private Integer competitiveMin;
 	private Integer competitiveMax;
+	private Integer competitiveMinTeams;
 
 	private RewardMode rewardMode = RewardMode.NONE;
 	private final List<String> rewardCommands = new ArrayList<>();
@@ -218,6 +219,15 @@ public final class Arena {
 		this.competitiveMax = max;
 	}
 
+	public Integer getCompetitiveMinTeamsRaw() {
+		return this.competitiveMinTeams;
+	}
+
+	/** @param minTeams null = the config.yml default (competitive.min-teams) */
+	public void setCompetitiveMinTeams(final Integer minTeams) {
+		this.competitiveMinTeams = minTeams;
+	}
+
 	/** Competitive matches may run here (default: yes). */
 	public boolean isCompetitive() {
 		return this.competitiveEnabled == null || this.competitiveEnabled;
@@ -306,6 +316,7 @@ public final class Arena {
 		copy.competitiveEnabled = this.competitiveEnabled;
 		copy.competitiveMin = this.competitiveMin;
 		copy.competitiveMax = this.competitiveMax;
+		copy.competitiveMinTeams = this.competitiveMinTeams;
 		copy.maintenance = this.maintenance;
 		copy.displayName = this.displayName;
 		copy.rewardMode = this.rewardMode;
