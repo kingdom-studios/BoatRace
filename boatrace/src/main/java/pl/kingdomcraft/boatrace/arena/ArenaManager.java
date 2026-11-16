@@ -25,6 +25,8 @@ public final class ArenaManager {
 	private final File file;
 	private final Map<String, Arena> arenas = new LinkedHashMap<>();
 	private Runnable listener;
+	/** config.yml map-names (lower case arena name -> readable name) */
+	private Map<String, String> configNames = new LinkedHashMap<>();
 
 	public ArenaManager(final JavaPlugin plugin) {
 		this.plugin = plugin;
@@ -83,6 +85,15 @@ public final class ArenaManager {
 	private void changed() {
 		if (this.listener != null)
 			this.listener.run();
+	}
+
+	/** The names of config.yml map-names; applied by the next load(). */
+	public void setConfigNames(final Map<String, String> names) {
+		this.configNames = new LinkedHashMap<>();
+
+		if (names != null)
+			for (final Map.Entry<String, String> entry : names.entrySet())
+				this.configNames.put(key(entry.getKey()), entry.getValue());
 	}
 
 	public void load() {
@@ -155,6 +166,7 @@ public final class ArenaManager {
 			arena.setLaps(section.getInt("laps", 1));
 			arena.setMaintenance(section.getBoolean("maintenance", false));
 			arena.setDisplayName(section.getString("display-name"));
+				arena.setConfigName(this.configNames.get(key(name)));
 			arena.setCompetitive(section.isBoolean("competitive.enabled") ? section.getBoolean("competitive.enabled") : null,
 					section.isInt("competitive.min-players") ? section.getInt("competitive.min-players") : null,
 					section.isInt("competitive.max-players") ? section.getInt("competitive.max-players") : null);

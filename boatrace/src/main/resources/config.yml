@@ -313,3 +313,12 @@ competitive:
     enabled: true
     meta-key: "boatrace_team"
     format: "{chat}[{name}] "   # {chat} {name} {id}
+
+# Readable map names (website, menus, messages). Key = arena name (technical id), value = how the map is called.
+# Applied on startup and /bre reload and written to the boatrace_tracks table for the website / CaptainHook.
+# A name set in-game with /bre displayname <arena> <name> takes priority. Not listed = derived from the arena name.
+# Example:
+#   map-names:
+#     "1": "Monaco GP"
+#     "2": "Silverstone"
+map-names: {}

@@ -79,6 +79,8 @@ public final class Settings {
 	/** countdown once the lobby has enough racers; a full lobby starts at once */
 	/** teams needed to start a match (default for arenas without their own min-teams); 2 = the classic behavior */
 	public int compMinTeams = 2;
+	/** config.yml map-names: arena -> readable name (website / menus) */
+	public final Map<String, String> mapNames = new java.util.LinkedHashMap<>();
 	public int compCountdownSeconds = 30;
 	/** live information (action bar / title) for everybody waiting in a competitive lobby */
 	public boolean compLobbyActionBar = true;
@@ -331,6 +333,14 @@ public final class Settings {
 		this.compEnabled = c.getBoolean("competitive.enabled", false);
 		this.compMinPlayers = Math.max(2, c.getInt("competitive.min-players", 4));
 		this.compMinTeams = Math.max(2, c.getInt("competitive.min-teams", 2));
+
+		this.mapNames.clear();
+		final ConfigurationSection names = c.getConfigurationSection("map-names");
+
+		if (names != null)
+			for (final String arena : names.getKeys(false))
+				if (names.isString(arena) && !names.getString(arena, "").isBlank())
+					this.mapNames.put(arena, names.getString(arena).trim());
 		this.compMaxTeamSize = Math.max(1, c.getInt("competitive.max-team-size", 4));
 		this.compCountdownSeconds = Math.max(0, c.getInt("competitive.countdown-seconds", 30));
 		this.compLobbyActionBar = c.getBoolean("competitive.lobby-display.action-bar", true);

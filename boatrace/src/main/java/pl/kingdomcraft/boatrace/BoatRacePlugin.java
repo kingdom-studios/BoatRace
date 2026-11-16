@@ -62,6 +62,7 @@ public final class BoatRacePlugin extends SimplePlugin {
 		Msg.load(this);
 
 		this.arenas = new ArenaManager(this);
+		this.arenas.setConfigNames(this.settings.mapNames);
 		this.arenas.load();
 
 		this.storage = new RecordStorage(this);
@@ -174,6 +175,7 @@ public final class BoatRacePlugin extends SimplePlugin {
 		this.reloadConfig();
 		this.settings.load(this.getConfig());
 		Msg.load(this);
+		this.arenas.setConfigNames(this.settings.mapNames);
 		this.arenas.load();
 		this.applyRankingSettings();
 

@@ -61,6 +61,8 @@ public final class Arena {
 
 	/** how the map is called for players and on the website; null = derived from the arena name */
 	private String displayName;
+	/** map-names: in config.yml (applied on load / reload); used when no /bre displayname was set */
+	private String configName;
 
 	/** laps of a normal race on this arena (events may override it) */
 	private int laps = 1;
@@ -178,9 +180,17 @@ public final class Arena {
 		if (this.displayName != null)
 			return this.displayName;
 
+		if (this.configName != null)
+			return this.configName;
+
 		final String readable = this.name.replace('_', ' ').replace('-', ' ').replaceAll("\\s+", " ").trim();
 
 		return readable.isEmpty() ? this.name : readable;
+	}
+
+	/** @param configName the name from config.yml map-names, null / blank = none */
+	public void setConfigName(final String configName) {
+		this.configName = configName == null || configName.isBlank() ? null : configName.trim();
 	}
 
 	public boolean isMaintenance() {
@@ -319,6 +329,7 @@ public final class Arena {
 		copy.competitiveMinTeams = this.competitiveMinTeams;
 		copy.maintenance = this.maintenance;
 		copy.displayName = this.displayName;
+		copy.configName = this.configName;
 		copy.rewardMode = this.rewardMode;
 		copy.rewardCommands.addAll(this.rewardCommands);
 
